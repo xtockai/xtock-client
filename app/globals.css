@@ -1,0 +1,108 @@
+@layer theme, base, clerk, components, utilities;
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #387e69;
+  --color-primary-600: #387e69;
+  --color-primary-700: #2c5f55;
+  --color-primary-50: #f0f9f6;
+  --color-success-700: #027a48;
+  --color-success-50: #ecfdf3;
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+}
+
+.background {
+  overflow: hidden;
+  background: #f8f8f8;
+  background-image: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 11px,
+      #f2f2f2 11px,
+      #f2f2f2 12px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 11px,
+      #f2f2f2 11px,
+      #f2f2f2 12px
+    );
+}
+
+.mask {
+  mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 0%,
+    rgba(0, 0, 0, 1) 40px,
+    rgba(0, 0, 0, 1) calc(100% - 20px),
+    rgba(0, 0, 0, 0) 100%
+  );
+}
+
+/* Onboarding Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.4s ease-out forwards;
+}
+
+/* Loading Screen Animations */
+@keyframes letterPulse {
+  0%, 100% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+}
+
+@keyframes dot {
+  0%, 80%, 100% {
+    transform: scale(0);
+    opacity: 0.5;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-letterPulse {
+  animation: letterPulse 1.5s ease-in-out infinite;
+}
+
+.animate-dot {
+  animation: dot 1.4s ease-in-out infinite;
+}
