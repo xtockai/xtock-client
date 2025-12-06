@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@clerk/nextjs": "6.34.0",
+    "@googlemaps/js-api-loader": "2.0.2",
     "@radix-ui/react-select": "2.2.6",
     "@supabase/supabase-js": "2.86.0",
     "@tailwindcss/postcss": "^4.1.16",
@@ -26,5 +27,8 @@
     "react-syntax-highlighter": "^15.6.1",
     "tailwindcss": "^4.1.16",
     "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "@types/google.maps": "3.58.1"
   }
 }

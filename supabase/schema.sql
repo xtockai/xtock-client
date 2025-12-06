@@ -13,7 +13,9 @@ CREATE TABLE IF NOT EXISTS locations (
   organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   address TEXT NOT NULL,
-  kitchen_close TIME NOT NULL, -- Stored in UTC
+  latitude DECIMAL(10, 8),
+  longitude DECIMAL(11, 8),
+  kitchen_close TIMETZ NOT NULL, -- Time with timezone
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

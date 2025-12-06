@@ -4,13 +4,14 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { convertUTCToLocalTime, convertLocalTimeToUTC, getUserTimezone } from '@/lib/timezones'
+import { convertTIMETZToLocalTime, convertLocalTimeToTIMETZ, getUserTimezone, TIMEZONES } from '@/lib/timezones'
 
 interface Location {
   id: string
   name: string
   address: string
   kitchen_close: string
+  timezone?: string
   organization_id: string
 }
 
@@ -40,6 +41,16 @@ export default function LocationDetailPage() {
   const [saving, setSaving] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
 
+  const formatTime = (time: string) => {
+    if (!time) return ''
+    // Extract time part from TIMETZ format (e.g., "22:00:00-05" -> "22:00")
+    const timePart = time.split(/[+-]/)[0] // Split by + or - to get time part
+    const [hours, minutes] = timePart.split(':').map(Number)
+    const period = hours >= 12 ? 'PM' : 'AM'
+    const displayHours = hours % 12 || 12
+    return `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`
+  }
+
   const [formData, setFormData] = useState<OperatorFormData>({
     contactType: 'email',
     contactValue: '',
@@ -48,6 +59,7 @@ export default function LocationDetailPage() {
 
   const [editFormData, setEditFormData] = useState({
     name: '',
+    timezone: 'America/New_York',
     kitchenClose: ''
   })
 
@@ -75,13 +87,11 @@ export default function LocationDetailPage() {
         return
       }
 
-      // Convert UTC time to Bogota time for display
-      const appTimezone = 'America/Bogota'
-      const localTime = convertUTCToLocalTime(loc.kitchen_close, appTimezone)
-
+      // Kitchen close already comes in restaurant's timezone from DB (TIMETZ)
       setLocation({
         ...loc,
-        kitchen_close: localTime
+        timezone: 'America/New_York', // Default timezone for form display
+        kitchen_close: loc.kitchen_close
       })
 
       // Load operators
@@ -104,9 +114,14 @@ export default function LocationDetailPage() {
 
   const handleStartEdit = () => {
     if (!location) return
+    // Extract time part from TIMETZ (e.g., "22:00:00-05" -> "22:00")
+    const timePart = location.kitchen_close.split(/[+-]/)[0]
+    const timeForInput = timePart.substring(0, 5) // Get HH:MM
+
     setEditFormData({
       name: location.name,
-      kitchenClose: convertUTCToLocalTime(location.kitchen_close, 'America/Bogota')
+      timezone: 'America/New_York', // Default timezone for editing
+      kitchenClose: timeForInput
     })
     setShowEditModal(true)
   }
@@ -115,6 +130,7 @@ export default function LocationDetailPage() {
     setShowEditModal(false)
     setEditFormData({
       name: '',
+      timezone: 'America/New_York',
       kitchenClose: ''
     })
   }
@@ -127,12 +143,12 @@ export default function LocationDetailPage() {
 
     setSaving(true)
     try {
-      const appTimezone = 'America/Bogota'
+      const appTimezone = 'America/New_York'
       const { error } = await supabase
         .from('locations')
         .update({
           name: editFormData.name,
-          kitchen_close: convertLocalTimeToUTC(editFormData.kitchenClose, appTimezone)
+          kitchen_close: convertLocalTimeToTIMETZ(editFormData.kitchenClose, editFormData.timezone)
         })
         .eq('id', locationId)
 
@@ -146,6 +162,7 @@ export default function LocationDetailPage() {
       setShowEditModal(false)
       setEditFormData({
         name: '',
+        timezone: 'America/New_York',
         kitchenClose: ''
       })
       loadData()
@@ -232,7 +249,7 @@ export default function LocationDetailPage() {
               <p className="text-sm text-gray-600 mt-1">{location.address}</p>
               <div className="flex items-center gap-2 text-xs text-gray-500 mt-2">
                 <span>🕐</span>
-                <span>Kitchen closes at {convertUTCToLocalTime(location.kitchen_close, 'America/Bogota')}</span>
+                <span>Kitchen closes at {formatTime(location.kitchen_close)}</span>
               </div>
             </div>
             <div className="flex gap-3">
@@ -470,7 +487,31 @@ export default function LocationDetailPage() {
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Kitchen Closing Time
+                  Timezone
+                </label>
+                <div className="relative">
+                  <select
+                    value={editFormData.timezone}
+                    onChange={(e) => setEditFormData({ ...editFormData, timezone: e.target.value })}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-0 transition-colors appearance-none cursor-pointer"
+                  >
+                    {TIMEZONES.map((tz) => (
+                      <option key={tz.value} value={tz.value}>
+                        {tz.label} ({tz.offset})
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
+                    <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Kitchen Closing Time ({TIMEZONES.find(tz => tz.value === editFormData.timezone)?.label || 'Local time'})
                 </label>
                 <input
                   type="time"

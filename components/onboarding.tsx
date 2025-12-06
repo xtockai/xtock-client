@@ -8,11 +8,15 @@ import { LearnMore } from "../app/_template/components/learn-more";
 import { Footer } from "../app/_template/components/footer";
 import { CARDS } from "../app/_template/content/cards";
 import LoadingComponent from './loading'
-import { convertLocalTimeToUTC, getUserTimezone } from '@/lib/timezones'
+import AddressAutocomplete from './address-autocomplete'
+import { convertLocalTimeToTIMETZ, convertTIMETZToLocalTime, getUserTimezone, TIMEZONES } from '@/lib/timezones'
 
 interface Location {
   name: string
   address: string
+  latitude?: number
+  longitude?: number
+  timezone: string
   kitchenClose: string
 }
 
@@ -36,7 +40,7 @@ export default function Onboarding() {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState({
     orgName: '',
-    adminName: user?.firstName || '',
+    adminName: user?.fullName || '',
     orgId: '',
     locations: [] as Location[],
     collaborators: [] as Collaborator[],
@@ -107,7 +111,20 @@ export default function Onboarding() {
       // Check for locations
       const { data: locs } = await supabase.from('locations').select('*').eq('organization_id', clerkOrgId)
       if (locs && locs.length > 0) {
-        newData.locations = locs.map(l => ({ name: l.name, address: l.address, kitchenClose: l.kitchen_close }))
+        newData.locations = locs.map(l => {
+          // Extract time part from TIMETZ (e.g., "22:00:00-05" -> "22:00")
+          const timePart = l.kitchen_close.split(/[+-]/)[0]
+          const timeForInput = timePart.substring(0, 5) // Get HH:MM
+
+          return {
+            name: l.name,
+            address: l.address,
+            latitude: l.latitude,
+            longitude: l.longitude,
+            timezone: 'America/New_York', // Default timezone for form display
+            kitchenClose: timeForInput
+          }
+        })
         currentStep = 3
 
         // Check for collaborators
@@ -207,13 +224,14 @@ export default function Onboarding() {
           return
         }
         // Save locations
-        const userTimezone = getUserTimezone()
         for (const loc of data.locations) {
           const { error } = await supabase.from('locations').insert({
             organization_id: data.orgId,
             name: loc.name,
             address: loc.address,
-            kitchen_close: convertLocalTimeToUTC(loc.kitchenClose, userTimezone)
+            latitude: loc.latitude,
+            longitude: loc.longitude,
+            kitchen_close: convertLocalTimeToTIMETZ(loc.kitchenClose, loc.timezone)
           })
 
           if (error) {
@@ -302,14 +320,21 @@ export default function Onboarding() {
   const addLocation = () => {
     setData(prev => ({
       ...prev,
-      locations: [...prev.locations, { name: '', address: '', kitchenClose: '' }]
+      locations: [...prev.locations, { name: '', address: '', latitude: undefined, longitude: undefined, timezone: getUserTimezone(), kitchenClose: '' }]
     }))
   }
 
-  const updateLocation = (index: number, field: keyof Location, value: string) => {
+  const updateLocation = (index: number, field: keyof Location, value: string | number | undefined) => {
     setData(prev => ({
       ...prev,
       locations: prev.locations.map((loc, i) => i === index ? { ...loc, [field]: value } : loc)
+    }))
+  }
+
+  const updateLocationAddress = (index: number, address: string, lat?: number, lng?: number) => {
+    setData(prev => ({
+      ...prev,
+      locations: prev.locations.map((loc, i) => i === index ? { ...loc, address, latitude: lat, longitude: lng } : loc)
     }))
   }
 
@@ -337,7 +362,7 @@ export default function Onboarding() {
       <div className="max-w-4xl mx-auto">
         {/* Header */}
         <div className="text-center sm:mb-2 md:mb-12">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">Welcome to Xtock</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Welcome to Xtock</h1>
           <p className="text-lg text-gray-600">Let's get your organization set up in a few simple steps</p>
         </div>
  
@@ -430,12 +455,12 @@ export default function Onboarding() {
         </div>
 
         {/* Content Card */}
-        <div className="bg-white rounded-2xl shadow-xl p-8 sm:p-10 backdrop-blur-sm bg-opacity-95 border border-gray-100">
+        <div className="bg-white rounded-2xl shadow-xl p-4 sm:p-10 backdrop-blur-sm bg-opacity-95 border border-gray-100">
 
       {step === 1 && (
         <div className="animate-fadeIn">
           <div className="mb-8">
-            <h2 className="text-3xl font-bold text-gray-900 mb-2">Basic Information</h2>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Basic Information</h2>
             <p className="text-gray-600">Tell us about your organization</p>
           </div>
           <div className="space-y-6">
@@ -469,8 +494,8 @@ export default function Onboarding() {
 
       {step === 2 && (
         <div className="animate-fadeIn">
-          <div className="mb-8">
-            <h2 className="text-3xl font-bold text-gray-900 mb-2">Locations</h2>
+          <div className="mb-4">
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Locations</h2>
             <p className="text-gray-600">Add your business locations</p>
           </div>
           <div className="space-y-6">
@@ -482,48 +507,73 @@ export default function Onboarding() {
                     {i + 1}
                   </div>
                 </div>
-                <div className="group">
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    Location Name
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g., Downtown Branch"
-                    value={loc.name}
-                    onChange={(e) => updateLocation(i, 'name', e.target.value)}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all outline-none bg-white"
-                  />
-                </div>
-                <div className="group">
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    Address
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="123 Main St, City, State"
-                    value={loc.address}
-                    onChange={(e) => updateLocation(i, 'address', e.target.value)}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all outline-none bg-white"
-                  />
-                </div>
-                <div className="group">
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    Kitchen Close Time (Your local time)
-                  </label>
-                  <div className="relative">
+                <div className="md:flex md:gap-4">
+                  <div className="group md:flex-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      Location Name
+                    </label>
                     <input
-                      type="time"
-                      value={loc.kitchenClose}
-                      onChange={(e) => updateLocation(i, 'kitchenClose', e.target.value)}
+                      type="text"
+                      placeholder="e.g., Downtown Branch"
+                      value={loc.name}
+                      onChange={(e) => updateLocation(i, 'name', e.target.value)}
                       className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all outline-none bg-white"
                     />
-                    <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
-                      <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
+                  </div>
+                  <div className="group md:flex-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      Address
+                    </label>
+                    <AddressAutocomplete
+                      value={loc.address}
+                      onChange={(address, lat, lng) => updateLocationAddress(i, address, lat, lng)}
+                      placeholder="123 Main St, City, State"
+                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all outline-none bg-white"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-4">
+                  <div className="group flex-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      Timezone
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={loc.timezone}
+                        onChange={(e) => updateLocation(i, 'timezone', e.target.value)}
+                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all outline-none bg-white appearance-none cursor-pointer"
+                      >
+                        {TIMEZONES.map((tz) => (
+                          <option key={tz.value} value={tz.value}>
+                            {tz.label} ({tz.offset})
+                          </option>
+                        ))}
+                      </select>
+                      <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
+                        <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </div>
                     </div>
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">Time will be saved in UTC automatically</p>
+                  <div className="group flex-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      Kitchen Close Time
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="time"
+                        value={loc.kitchenClose}
+                        onChange={(e) => updateLocation(i, 'kitchenClose', e.target.value)}
+                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all outline-none bg-white"
+                      />
+                      <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
+                        <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             ))}
@@ -543,7 +593,7 @@ export default function Onboarding() {
       {step === 3 && (
         <div className="animate-fadeIn">
           <div className="mb-8">
-            <h2 className="text-3xl font-bold text-gray-900 mb-2">Operators</h2>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Operators</h2>
             <p className="text-gray-600">Add team members who will operate the system</p>
           </div>
           <div className="space-y-6">
@@ -643,7 +693,7 @@ export default function Onboarding() {
       {step === 4 && (
         <div className="animate-fadeIn">
           <div className="mb-4">
-            <h2 className="text-3xl font-bold text-gray-900 mb-2">POA Provider</h2>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">POA Provider</h2>
             <p className="text-gray-600">Connect your point-of-sale system</p>
           </div>
           <div className="space-y-6">

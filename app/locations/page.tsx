@@ -4,7 +4,8 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useOrganizationList } from '@clerk/nextjs'
 import { useRouter } from 'next/navigation'
-import { convertLocalTimeToUTC, convertUTCToLocalTime, getUserTimezone } from '@/lib/timezones'
+import { convertLocalTimeToTIMETZ, convertTIMETZToLocalTime, getUserTimezone, TIMEZONES } from '@/lib/timezones'
+import AddressAutocomplete from '@/components/address-autocomplete'
 
 interface Location {
   id: string
@@ -17,6 +18,9 @@ interface Location {
 interface LocationFormData {
   name: string
   address: string
+  latitude?: number
+  longitude?: number
+  timezone: string
   kitchenClose: string
 }
 
@@ -30,7 +34,9 @@ export default function LocationsPage() {
 
   const formatTime = (time: string) => {
     if (!time) return ''
-    const [hours, minutes] = time.split(':').map(Number)
+    // Extract time part from TIMETZ format (e.g., "22:00:00-05" -> "22:00")
+    const timePart = time.split(/[+-]/)[0] // Split by + or - to get time part
+    const [hours, minutes] = timePart.split(':').map(Number)
     const period = hours >= 12 ? 'PM' : 'AM'
     const displayHours = hours % 12 || 12
     return `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`
@@ -39,10 +45,22 @@ export default function LocationsPage() {
   const [formData, setFormData] = useState<LocationFormData>({
     name: '',
     address: '',
+    latitude: undefined,
+    longitude: undefined,
+    timezone: 'America/New_York',
     kitchenClose: ''
   })
 
   const orgId = userMemberships?.data?.[0]?.organization?.id
+
+  const handleAddressChange = (address: string, lat?: number, lng?: number) => {
+    setFormData(prev => ({
+      ...prev,
+      address,
+      latitude: lat,
+      longitude: lng
+    }))
+  }
 
   useEffect(() => {
     loadLocations()
@@ -65,13 +83,12 @@ export default function LocationsPage() {
         return
       }
 
-      // Transform data to include operator count and convert UTC to app timezone
-      const appTimezone = 'America/Bogota'
+      // Transform data to include operator count
       const locationsWithCount = locs?.map(loc => ({
         id: loc.id,
         name: loc.name,
         address: loc.address,
-        kitchen_close: convertUTCToLocalTime(loc.kitchen_close, appTimezone),
+        kitchen_close: loc.kitchen_close, // Already in restaurant's timezone from DB
         operator_count: loc.collaborators?.[0]?.count || 0
       })) || []
 
@@ -89,12 +106,13 @@ export default function LocationsPage() {
 
     setSaving(true)
     try {
-      const appTimezone = 'America/Bogota'
       const { error } = await supabase.from('locations').insert({
         organization_id: orgId,
         name: formData.name,
         address: formData.address,
-        kitchen_close: convertLocalTimeToUTC(formData.kitchenClose, appTimezone)
+        latitude: formData.latitude,
+        longitude: formData.longitude,
+        kitchen_close: convertLocalTimeToTIMETZ(formData.kitchenClose, formData.timezone)
       })
 
       if (error) {
@@ -104,7 +122,7 @@ export default function LocationsPage() {
       }
 
       // Reset form and close modal
-      setFormData({ name: '', address: '', kitchenClose: '' })
+      setFormData({ name: '', address: '', latitude: undefined, longitude: undefined, timezone: 'America/New_York', kitchenClose: '' })
       setShowModal(false)
 
       // Reload locations
@@ -136,7 +154,7 @@ export default function LocationsPage() {
             className="px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-lg font-medium hover:shadow-lg transition-all duration-200 flex items-center gap-2"
           >
             <span className="text-lg">+</span>
-            Create Location
+            Location
           </button>
         </div>
 
@@ -171,7 +189,7 @@ export default function LocationsPage() {
                 <p className="text-sm text-gray-600 mb-3">{location.address}</p>
                 <div className="flex items-center gap-2 text-xs text-gray-500">
                   <span>🕐</span>
-                  <span>Kitchen closes at {convertUTCToLocalTime(location.kitchen_close)}</span>
+                  <span>Kitchen closes at {formatTime(location.kitchen_close)}</span>
                 </div>
               </button>
             ))}
@@ -217,10 +235,9 @@ export default function LocationsPage() {
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                   Address
                 </label>
-                <input
-                  type="text"
+                <AddressAutocomplete
                   value={formData.address}
-                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  onChange={handleAddressChange}
                   placeholder="e.g., 123 Main St, City"
                   className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-0 transition-colors"
                 />
@@ -228,7 +245,31 @@ export default function LocationsPage() {
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Kitchen Close Time (Bogota time)
+                  Timezone
+                </label>
+                <div className="relative">
+                  <select
+                    value={formData.timezone}
+                    onChange={(e) => setFormData({ ...formData, timezone: e.target.value })}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-0 transition-colors appearance-none cursor-pointer"
+                  >
+                    {TIMEZONES.map((tz) => (
+                      <option key={tz.value} value={tz.value}>
+                        {tz.label} ({tz.offset})
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
+                    <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Kitchen Close Time ({TIMEZONES.find(tz => tz.value === formData.timezone)?.label || 'Local time'})
                 </label>
                 <div className="relative">
                   <input
@@ -241,7 +282,7 @@ export default function LocationsPage() {
                     🕐
                   </div>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">Time in Bogota timezone, saved in UTC automatically</p>
+                <p className="text-xs text-gray-500 mt-1">Time in Eastern timezone, saved in UTC automatically</p>
               </div>
             </div>
 
