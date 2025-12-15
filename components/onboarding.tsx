@@ -9,7 +9,7 @@ import { Footer } from "../app/_template/components/footer";
 import { CARDS } from "../app/_template/content/cards";
 import LoadingComponent from './loading'
 import AddressAutocomplete from './address-autocomplete'
-import { convertLocalTimeToTIMETZ, convertTIMETZToLocalTime, getUserTimezone, TIMEZONES } from '@/lib/timezones'
+import { convertLocalTimeToTIMETZ, extractTimezoneFromTIMETZ, getUserTimezone, TIMEZONES } from '@/lib/timezones'
 
 interface Location {
   name: string
@@ -112,16 +112,19 @@ export default function Onboarding() {
       const { data: locs } = await supabase.from('locations').select('*').eq('organization_id', clerkOrgId)
       if (locs && locs.length > 0) {
         newData.locations = locs.map(l => {
-          // Extract time part from TIMETZ (e.g., "22:00:00-05" -> "22:00")
+          // Extract time part from TIMETZ (e.g., "22:00:00-05:00" -> "22:00")
           const timePart = l.kitchen_close.split(/[+-]/)[0]
           const timeForInput = timePart.substring(0, 5) // Get HH:MM
+
+          // Extract timezone from TIMETZ offset and map to IANA timezone
+          const extractedTimezone = extractTimezoneFromTIMETZ(l.kitchen_close)
 
           return {
             name: l.name,
             address: l.address,
             latitude: l.latitude,
             longitude: l.longitude,
-            timezone: 'America/New_York', // Default timezone for form display
+            timezone: extractedTimezone,
             kitchenClose: timeForInput
           }
         })

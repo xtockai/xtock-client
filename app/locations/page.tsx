@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useOrganizationList } from '@clerk/nextjs'
 import { useRouter } from 'next/navigation'
-import { convertLocalTimeToTIMETZ, convertTIMETZToLocalTime, getUserTimezone, TIMEZONES } from '@/lib/timezones'
+import { convertLocalTimeToTIMETZ, extractTimezoneFromTIMETZ, getUserTimezone, TIMEZONES } from '@/lib/timezones'
 import AddressAutocomplete from '@/components/address-autocomplete'
 
 interface Location {
@@ -29,6 +29,7 @@ export default function LocationsPage() {
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [editingLocation, setEditingLocation] = useState<Location | null>(null)
   const { userMemberships } = useOrganizationList({ userMemberships: { infinite: true } })
   const router = useRouter()
 
@@ -66,6 +67,17 @@ export default function LocationsPage() {
     loadLocations()
   }, [orgId])
 
+  useEffect(() => {
+    console.log("Form data changed:", formData);
+  }, [formData])
+
+  // Effect to ensure timezone is set when editing
+  useEffect(() => {
+    if (editingLocation && showModal) {
+      console.log("Modal opened for editing, current formData timezone:", formData.timezone);
+    }
+  }, [editingLocation, showModal, formData.timezone])
+
   const loadLocations = async () => {
     if (!orgId) return
 
@@ -98,6 +110,31 @@ export default function LocationsPage() {
     }
   }
 
+  const handleEditLocation = (location: Location) => {
+    console.log("Editing location:", location);
+    console.log("Kitchen close time:", location.kitchen_close);
+
+    // Extract time part from TIMETZ (e.g., "22:00:00-05:00" -> "22:00")
+    const timePart = location.kitchen_close.split(/[+-]/)[0]
+    const timeForInput = timePart.substring(0, 5) // Get HH:MM
+    console.log("Time for input:", timeForInput);
+
+    // Extract timezone from TIMETZ offset and map to IANA timezone
+    const extractedTimezone = extractTimezoneFromTIMETZ(location.kitchen_close)
+    console.log("Extracted timezone:", extractedTimezone);
+
+    setEditingLocation(location)
+    setFormData({
+      name: location.name,
+      address: location.address,
+      latitude: undefined, // You might want to store and load these from DB
+      longitude: undefined,
+      timezone: extractedTimezone,
+      kitchenClose: timeForInput
+    })
+    setShowModal(true)
+  }
+
   const handleSaveLocation = async () => {
     if (!formData.name || !formData.address || !formData.kitchenClose) {
       alert('Please fill in all fields')
@@ -106,23 +143,45 @@ export default function LocationsPage() {
 
     setSaving(true)
     try {
-      const { error } = await supabase.from('locations').insert({
-        organization_id: orgId,
-        name: formData.name,
-        address: formData.address,
-        latitude: formData.latitude,
-        longitude: formData.longitude,
-        kitchen_close: convertLocalTimeToTIMETZ(formData.kitchenClose, formData.timezone)
-      })
+      if (editingLocation) {
+        // Update existing location
+        const { error } = await supabase
+          .from('locations')
+          .update({
+            name: formData.name,
+            address: formData.address,
+            latitude: formData.latitude,
+            longitude: formData.longitude,
+            kitchen_close: convertLocalTimeToTIMETZ(formData.kitchenClose, formData.timezone)
+          })
+          .eq('id', editingLocation.id)
 
-      if (error) {
-        console.error('Error saving location:', error)
-        alert(`Failed to save location. Error: ${error.message}`)
-        return
+        if (error) {
+          console.error('Error updating location:', error)
+          alert(`Failed to update location. Error: ${error.message}`)
+          return
+        }
+      } else {
+        // Create new location
+        const { error } = await supabase.from('locations').insert({
+          organization_id: orgId,
+          name: formData.name,
+          address: formData.address,
+          latitude: formData.latitude,
+          longitude: formData.longitude,
+          kitchen_close: convertLocalTimeToTIMETZ(formData.kitchenClose, formData.timezone)
+        })
+
+        if (error) {
+          console.error('Error saving location:', error)
+          alert(`Failed to save location. Error: ${error.message}`)
+          return
+        }
       }
 
       // Reset form and close modal
       setFormData({ name: '', address: '', latitude: undefined, longitude: undefined, timezone: 'America/New_York', kitchenClose: '' })
+      setEditingLocation(null)
       setShowModal(false)
 
       // Reload locations
@@ -130,6 +189,12 @@ export default function LocationsPage() {
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleCloseModal = () => {
+    setShowModal(false)
+    setEditingLocation(null)
+    setFormData({ name: '', address: '', latitude: undefined, longitude: undefined, timezone: 'America/New_York', kitchenClose: '' })
   }
 
   if (loading) {
@@ -174,24 +239,40 @@ export default function LocationsPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {locations.map((location) => (
-              <button
-                key={location.id}
-                onClick={() => router.push(`/locations/${location.id}`)}
-                className="bg-white rounded-xl border-2 border-gray-200 p-6 hover:border-blue-500 hover:shadow-lg transition-all duration-200 text-left"
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="text-3xl">📍</div>
-                  <div className="bg-blue-50 text-blue-600 text-xs font-medium px-2 py-1 rounded-full">
-                    {location.operator_count} operators
+              <div key={location.id} className="bg-white rounded-xl border-2 border-gray-200 hover:border-blue-500 hover:shadow-lg transition-all duration-200 relative group">
+                {/* Edit button */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleEditLocation(location)
+                  }}
+                  className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-2 bg-white rounded-lg shadow-md hover:shadow-lg"
+                  title="Edit location"
+                >
+                  <svg className="w-4 h-4 text-gray-600 hover:text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                </button>
+
+                {/* Main clickable area */}
+                <button
+                  onClick={() => router.push(`/locations/${location.id}`)}
+                  className="w-full p-6 text-left"
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="text-3xl">📍</div>
+                    <div className="bg-blue-50 text-blue-600 text-xs font-medium px-2 py-1 rounded-full">
+                      {location.operator_count} operators
+                    </div>
                   </div>
-                </div>
-                <h3 className="text-lg font-bold text-gray-900 mb-2">{location.name}</h3>
-                <p className="text-sm text-gray-600 mb-3">{location.address}</p>
-                <div className="flex items-center gap-2 text-xs text-gray-500">
-                  <span>🕐</span>
-                  <span>Kitchen closes at {formatTime(location.kitchen_close)}</span>
-                </div>
-              </button>
+                  <h3 className="text-lg font-bold text-gray-900 mb-2">{location.name}</h3>
+                  <p className="text-sm text-gray-600 mb-3">{location.address}</p>
+                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                    <span>🕐</span>
+                    <span>Kitchen closes at {formatTime(location.kitchen_close)}</span>
+                  </div>
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -204,9 +285,9 @@ export default function LocationsPage() {
             {/* Modal Header */}
             <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 rounded-t-2xl">
               <div className="flex items-center justify-between">
-                <h2 className="text-xl font-bold text-gray-900">Create Location</h2>
+                <h2 className="text-xl font-bold text-gray-900">{editingLocation ? 'Edit Location' : 'Create Location'}</h2>
                 <button
-                  onClick={() => setShowModal(false)}
+                  onClick={handleCloseModal}
                   className="text-gray-400 hover:text-gray-600 transition-colors"
                 >
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -249,6 +330,7 @@ export default function LocationsPage() {
                 </label>
                 <div className="relative">
                   <select
+                    key={`timezone-${editingLocation?.id || 'new'}-${formData.timezone}`}
                     value={formData.timezone}
                     onChange={(e) => setFormData({ ...formData, timezone: e.target.value })}
                     className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-0 transition-colors appearance-none cursor-pointer"
@@ -289,7 +371,7 @@ export default function LocationsPage() {
             {/* Modal Footer */}
             <div className="sticky bottom-0 bg-gray-50 px-6 py-4 rounded-b-2xl border-t border-gray-200 flex gap-3">
               <button
-                onClick={() => setShowModal(false)}
+                onClick={handleCloseModal}
                 className="flex-1 px-4 py-3 border-2 border-gray-200 rounded-lg font-medium text-gray-700 hover:bg-gray-100 transition-colors"
                 disabled={saving}
               >
@@ -300,7 +382,7 @@ export default function LocationsPage() {
                 disabled={saving}
                 className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-lg font-medium hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {saving ? 'Saving...' : 'Save Location'}
+                {saving ? (editingLocation ? 'Updating...' : 'Saving...') : (editingLocation ? 'Update Location' : 'Save Location')}
               </button>
             </div>
           </div>

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { convertTIMETZToLocalTime, convertLocalTimeToTIMETZ, getUserTimezone, TIMEZONES } from '@/lib/timezones'
+import { convertLocalTimeToTIMETZ, extractTimezoneFromTIMETZ, getUserTimezone, TIMEZONES } from '@/lib/timezones'
 
 interface Location {
   id: string
@@ -59,7 +59,7 @@ export default function LocationDetailPage() {
 
   const [editFormData, setEditFormData] = useState({
     name: '',
-    timezone: 'America/New_York',
+    timezone: getUserTimezone(),
     kitchenClose: ''
   })
 
@@ -90,7 +90,6 @@ export default function LocationDetailPage() {
       // Kitchen close already comes in restaurant's timezone from DB (TIMETZ)
       setLocation({
         ...loc,
-        timezone: 'America/New_York', // Default timezone for form display
         kitchen_close: loc.kitchen_close
       })
 
@@ -114,13 +113,16 @@ export default function LocationDetailPage() {
 
   const handleStartEdit = () => {
     if (!location) return
-    // Extract time part from TIMETZ (e.g., "22:00:00-05" -> "22:00")
+    // Extract time part from TIMETZ (e.g., "22:00:00-05:00" -> "22:00")
     const timePart = location.kitchen_close.split(/[+-]/)[0]
     const timeForInput = timePart.substring(0, 5) // Get HH:MM
 
+    // Extract timezone from TIMETZ offset and map to IANA timezone
+    const extractedTimezone = extractTimezoneFromTIMETZ(location.kitchen_close)
+
     setEditFormData({
       name: location.name,
-      timezone: 'America/New_York', // Default timezone for editing
+      timezone: extractedTimezone,
       kitchenClose: timeForInput
     })
     setShowEditModal(true)
@@ -130,7 +132,7 @@ export default function LocationDetailPage() {
     setShowEditModal(false)
     setEditFormData({
       name: '',
-      timezone: 'America/New_York',
+      timezone: getUserTimezone(),
       kitchenClose: ''
     })
   }
@@ -143,7 +145,6 @@ export default function LocationDetailPage() {
 
     setSaving(true)
     try {
-      const appTimezone = 'America/New_York'
       const { error } = await supabase
         .from('locations')
         .update({
@@ -162,7 +163,7 @@ export default function LocationDetailPage() {
       setShowEditModal(false)
       setEditFormData({
         name: '',
-        timezone: 'America/New_York',
+        timezone: getUserTimezone(),
         kitchenClose: ''
       })
       loadData()

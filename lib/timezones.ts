@@ -261,3 +261,72 @@ export function convertTIMETZToLocalTime(
     return timetz.substring(0, 5); // Return first 5 chars as fallback (HH:MM)
   }
 }
+
+/**
+ * Extract timezone from TIMETZ field and find corresponding timezone string
+ * @param timetz - Time in TIMETZ format (HH:MM:SS+TZ)
+ * @returns IANA timezone string or default timezone
+ */
+export function extractTimezoneFromTIMETZ(timetz: string): string {
+  if (!timetz) return "America/New_York"; // Default timezone
+
+  console.log("Extracting timezone from TIMETZ:", timetz);
+
+  try {
+    // Check if it's TIMETZ format (has + or -)
+    if (timetz.includes("+") || timetz.includes("-")) {
+      // Parse offset (e.g., "15:30:00-05:00" -> "-05" or "15:30:00-05" -> "-05")
+      const offsetMatch = timetz.match(/([+-]\d{2}):?(\d{2})?/);
+      if (offsetMatch) {
+        const offsetHours = parseInt(offsetMatch[1]);
+        const offsetMinutes = offsetMatch[2] ? parseInt(offsetMatch[2]) : 0;
+        const totalOffsetMinutes =
+          offsetHours * 60 + (offsetHours < 0 ? -offsetMinutes : offsetMinutes);
+
+        console.log(
+          "Extracted offset hours:",
+          offsetHours,
+          "minutes:",
+          offsetMinutes,
+          "total minutes:",
+          totalOffsetMinutes
+        );
+
+        // Map common offsets to timezones
+        // Note: This covers both standard and daylight saving time offsets
+        const timezoneMap: { [key: string]: string } = {
+          "-600": "Pacific/Honolulu", // Hawaii (UTC-10)
+          "-540": "America/Anchorage", // Alaska (UTC-9)
+          "-480": "America/Los_Angeles", // Pacific (UTC-8) / Tijuana
+          "-420": "America/Denver", // Mountain (UTC-7)
+          "-360": "America/Chicago", // Central (UTC-6) / Mexico City / Monterrey
+          "-300": "America/New_York", // Eastern (UTC-5) / Bogotá / Lima / Cancún
+          "-240": "America/Santiago", // Chile (UTC-4) / Atlantic
+          "-180": "America/Buenos_Aires", // Argentina (UTC-3) / São Paulo
+          "-120": "America/Sao_Paulo", // Brazil summer time (UTC-2)
+          "0": "Europe/London", // GMT (UTC+0)
+          "60": "Europe/Paris", // CET (UTC+1) / Madrid / Rome / Berlin
+          "120": "Europe/Paris", // CEST summer time (UTC+2)
+          "240": "Asia/Dubai", // UAE (UTC+4)
+          "330": "Asia/Kolkata", // India (UTC+5:30)
+          "480": "Asia/Shanghai", // China/Singapore/Hong Kong (UTC+8)
+          "540": "Asia/Tokyo", // Japan (UTC+9)
+          "600": "Australia/Sydney", // Australian Eastern (UTC+10)
+          "660": "Australia/Sydney", // Australian Eastern DST (UTC+11)
+        };
+
+        const detectedTimezone = timezoneMap[totalOffsetMinutes.toString()];
+        console.log("Detected timezone:", detectedTimezone);
+
+        return detectedTimezone || "America/New_York";
+      }
+    }
+
+    // Default fallback
+    console.log("Using default timezone fallback");
+    return "America/New_York";
+  } catch (error) {
+    console.warn("Error extracting timezone from TIMETZ:", error);
+    return "America/New_York";
+  }
+}
