@@ -195,7 +195,7 @@ export default function LocationDetailPage() {
 
       // Add country code if phone
       if (formData.contactType === 'phone') {
-        insertData.country_code = formData.countryCode
+        insertData.contact_value = formData.countryCode + formData.contactValue
       }
 
       const { error } = await supabase.from('collaborators').insert(insertData)

@@ -18,6 +18,7 @@ interface Location {
   longitude?: number
   timezone: string
   kitchenClose: string
+  collaborators: Collaborator[] // Add collaborators to each location
 }
 
 interface Collaborator {
@@ -38,12 +39,12 @@ export default function Onboarding() {
   const [step, setStep] = useState(1)
   const [completed, setCompleted] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [expandedLocations, setExpandedLocations] = useState<Set<number>>(new Set())
   const [data, setData] = useState({
     orgName: '',
     adminName: user?.fullName || '',
     orgId: '',
     locations: [] as Location[],
-    collaborators: [] as Collaborator[],
     apiKey: ''
   })
 
@@ -52,6 +53,7 @@ export default function Onboarding() {
   // Redirect to dashboard when onboarding is completed
   useEffect(() => {
     if (completed) {
+      console.log('🔍 ONBOARDING: Redirecting to dashboard')
       router.push('/')
     }
   }, [completed, router])
@@ -67,9 +69,11 @@ export default function Onboarding() {
     const check = async () => {
       // Prevent multiple executions
       if (hasChecked.current) return
-      console.log('userMemberships ', userMemberships)
+      console.log('🔍 ONBOARDING: Starting check...')
+      console.log('🔍 ONBOARDING: userMemberships ', userMemberships)
 
       if (!userMemberships?.data || userMemberships.data.length === 0) {
+        console.log('🔍 ONBOARDING: No memberships, staying at step 1')
         setLoading(false)
         return
       }
@@ -77,14 +81,20 @@ export default function Onboarding() {
       hasChecked.current = true
 
       const clerkOrgId = userMemberships.data[0].organization.id
+      console.log('🔍 ONBOARDING: Using organization ID:', clerkOrgId)
+      
       const { data: org, error: orgError } = await supabase
         .from('organizations')
         .select('*')
         .eq('id', clerkOrgId)
         .maybeSingle()
 
+      console.log('🔍 ONBOARDING: Supabase org data:', org)
+      console.log('🔍 ONBOARDING: Supabase org error:', orgError)
+
       // If no organization exists in our DB, stay at step 1
       if (!org || orgError) {
+        console.log('🔍 ONBOARDING: No org in DB, staying at step 1')
         setStep(1)
         setLoading(false)
         return
@@ -92,6 +102,7 @@ export default function Onboarding() {
 
       // If onboarding is completed, show completed state
       if (org.onboarding_completed) {
+        console.log('🔍 ONBOARDING: Onboarding completed, setting completed state')
         setCompleted(true)
         setLoading(false)
         return
@@ -111,6 +122,9 @@ export default function Onboarding() {
       // Check for locations
       const { data: locs } = await supabase.from('locations').select('*').eq('organization_id', clerkOrgId)
       if (locs && locs.length > 0) {
+        // Get all collaborators for all locations
+        const { data: cols } = await supabase.from('collaborators').select('*').eq('organization_id', clerkOrgId)
+        
         newData.locations = locs.map(l => {
           // Extract time part from TIMETZ (e.g., "22:00:00-05:00" -> "22:00")
           const timePart = l.kitchen_close.split(/[+-]/)[0]
@@ -119,21 +133,8 @@ export default function Onboarding() {
           // Extract timezone from TIMETZ offset and map to IANA timezone
           const extractedTimezone = extractTimezoneFromTIMETZ(l.kitchen_close)
 
-          return {
-            name: l.name,
-            address: l.address,
-            latitude: l.latitude,
-            longitude: l.longitude,
-            timezone: extractedTimezone,
-            kitchenClose: timeForInput
-          }
-        })
-        currentStep = 3
-
-        // Check for collaborators
-        const { data: cols } = await supabase.from('collaborators').select('*').eq('organization_id', clerkOrgId)
-        if (cols && cols.length > 0) {
-          newData.collaborators = cols.map(c => {
+          // Get collaborators for this specific location
+          const locationCollaborators = cols?.filter(c => c.location_id === l.id).map(c => {
             // Parse phone numbers to separate country code
             if (c.contact_type === 'phone' && c.contact_value) {
               const phoneMatch = c.contact_value.match(/^(\+\d{1,4})(\d+)$/)
@@ -150,7 +151,23 @@ export default function Onboarding() {
               contactValue: c.contact_value,
               countryCode: '+1'
             }
-          })
+          }) || []
+
+          return {
+            name: l.name,
+            address: l.address,
+            latitude: l.latitude,
+            longitude: l.longitude,
+            timezone: extractedTimezone,
+            kitchenClose: timeForInput,
+            collaborators: locationCollaborators
+          }
+        })
+        currentStep = 3
+
+        // Check if any location has collaborators
+        const hasCollaborators = newData.locations.some(loc => loc.collaborators.length > 0)
+        if (hasCollaborators) {
           currentStep = 4
 
           // Check for credentials
@@ -226,6 +243,20 @@ export default function Onboarding() {
           alert('Please fill in all location fields')
           return
         }
+        
+        // First, delete all existing locations for this organization
+        // This will cascade delete collaborators due to foreign key constraints
+        const { error: deleteError } = await supabase
+          .from('locations')
+          .delete()
+          .eq('organization_id', data.orgId)
+
+        if (deleteError) {
+          console.error('Error deleting existing locations:', deleteError)
+          alert('Failed to update locations. Please try again.')
+          return
+        }
+
         // Save locations
         for (const loc of data.locations) {
           const { error } = await supabase.from('locations').insert({
@@ -250,32 +281,71 @@ export default function Onboarding() {
       }
     } else if (step === 3) {
       try {
-        // Save collaborators
-        const locations = await supabase.from('locations').select('id').eq('organization_id', data.orgId).limit(1)
-        const locationId = locations.data?.[0]?.id
+        // Validate collaborator fields are filled for all locations
+        for (const location of data.locations) {
+          if (location.collaborators.length > 0) {
+            const hasEmptyFields = location.collaborators.some(col => 
+              !col.contactValue.trim() || 
+              (col.contactType === 'phone' && !col.countryCode)
+            )
+            if (hasEmptyFields) {
+              alert(`Please fill in all operator fields for location "${location.name}"`)
+              return
+            }
+          }
+        }
 
-        if (!locationId) {
-          alert('No location found. Please go back and add a location first.')
+        // Get location IDs from database (these should match the locations we just saved)
+        const { data: locationRecords } = await supabase
+          .from('locations')
+          .select('id, name')
+          .eq('organization_id', data.orgId)
+
+        if (!locationRecords || locationRecords.length === 0) {
+          alert('No locations found. Please go back and add locations first.')
           return
         }
 
-        for (const col of data.collaborators) {
-          // Format phone number with country code
-          const contactValue = col.contactType === 'phone'
-            ? `${col.countryCode || '+1'}${col.contactValue.replace(/\s/g, '')}`
-            : col.contactValue
+        // Delete all existing collaborators for this organization
+        const { error: deleteError } = await supabase
+          .from('collaborators')
+          .delete()
+          .eq('organization_id', data.orgId)
 
-          const { error } = await supabase.from('collaborators').insert({
-            organization_id: data.orgId,
-            location_id: locationId,
-            contact_type: col.contactType,
-            contact_value: contactValue
-          })
+        if (deleteError) {
+          console.error('Error deleting existing collaborators:', deleteError)
+          alert('Failed to update operators. Please try again.')
+          return
+        }
 
-          if (error) {
-            console.error('Error saving collaborator:', error)
-            alert(`Failed to save collaborator. Error: ${error.message}`)
-            return
+        // Save collaborators for each location
+        for (const location of data.locations) {
+          // Find the corresponding location record by name
+          const locationRecord = locationRecords.find(loc => loc.name === location.name)
+          if (!locationRecord) {
+            console.warn(`Location "${location.name}" not found in database`)
+            continue
+          }
+
+          for (const col of location.collaborators) {
+            // Format phone number with country code
+            const contactValue = col.contactType === 'phone'
+              ? `${col.countryCode || '+1'}${col.contactValue.replace(/\s/g, '')}`
+              : col.contactValue
+
+            // Insert collaborator
+            const { error } = await supabase.from('collaborators').insert({
+              organization_id: data.orgId,
+              location_id: locationRecord.id,
+              contact_type: col.contactType,
+              contact_value: contactValue
+            })
+
+            if (error) {
+              console.error('Error saving collaborator:', error)
+              alert(`Failed to save operator for location "${location.name}". Error: ${error.message}`)
+              return
+            }
           }
         }
         setStep(4)
@@ -323,7 +393,22 @@ export default function Onboarding() {
   const addLocation = () => {
     setData(prev => ({
       ...prev,
-      locations: [...prev.locations, { name: '', address: '', latitude: undefined, longitude: undefined, timezone: getUserTimezone(), kitchenClose: '' }]
+      locations: [...prev.locations, { 
+        name: '', 
+        address: '', 
+        latitude: undefined, 
+        longitude: undefined, 
+        timezone: getUserTimezone(), 
+        kitchenClose: '',
+        collaborators: []
+      }]
+    }))
+  }
+
+  const removeLocation = (index: number) => {
+    setData(prev => ({
+      ...prev,
+      locations: prev.locations.filter((_, i) => i !== index)
     }))
   }
 
@@ -341,18 +426,54 @@ export default function Onboarding() {
     }))
   }
 
-  const addCollaborator = () => {
+  const addCollaborator = (locationIndex: number) => {
     setData(prev => ({
       ...prev,
-      collaborators: [...prev.collaborators, { contactType: 'phone', contactValue: '', countryCode: '+1' }]
+      locations: prev.locations.map((loc, i) => 
+        i === locationIndex 
+          ? { ...loc, collaborators: [...loc.collaborators, { contactType: 'phone', contactValue: '', countryCode: '+1' }] }
+          : loc
+      )
     }))
   }
 
-  const updateCollaborator = (index: number, field: keyof Collaborator, value: string) => {
+  const removeCollaborator = (locationIndex: number, collaboratorIndex: number) => {
     setData(prev => ({
       ...prev,
-      collaborators: prev.collaborators.map((col, i) => i === index ? { ...col, [field]: value } : col)
+      locations: prev.locations.map((loc, i) => 
+        i === locationIndex 
+          ? { ...loc, collaborators: loc.collaborators.filter((_, colIndex) => colIndex !== collaboratorIndex) }
+          : loc
+      )
     }))
+  }
+
+  const updateCollaborator = (locationIndex: number, collaboratorIndex: number, field: keyof Collaborator, value: string) => {
+    setData(prev => ({
+      ...prev,
+      locations: prev.locations.map((loc, i) => 
+        i === locationIndex 
+          ? { 
+              ...loc, 
+              collaborators: loc.collaborators.map((col, colI) => 
+                colI === collaboratorIndex ? { ...col, [field]: value } : col
+              ) 
+            }
+          : loc
+      )
+    }))
+  }
+
+  const toggleLocationAccordion = (locationIndex: number) => {
+    setExpandedLocations(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(locationIndex)) {
+        newSet.delete(locationIndex)
+      } else {
+        newSet.add(locationIndex)
+      }
+      return newSet
+    })
   }
 
   // Loading screen or redirecting
@@ -506,8 +627,21 @@ export default function Onboarding() {
               <div key={i} className="p-6 bg-gradient-to-br from-gray-50 to-blue-50/30 border-2 border-gray-200 rounded-xl space-y-4 hover:shadow-md transition-all">
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="font-semibold text-gray-700">Location {i + 1}</h3>
-                  <div className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
-                    {i + 1}
+                  <div className="flex items-center gap-2">
+                    {data.locations.length > 1 && (
+                      <button
+                        onClick={() => removeLocation(i)}
+                        className="w-8 h-8 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center text-sm font-bold transition-colors group"
+                        title="Remove location"
+                      >
+                        <svg className="w-4 h-4 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    )}
+                    <div className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
+                      {i + 1}
+                    </div>
                   </div>
                 </div>
                 <div className="md:flex md:gap-4">
@@ -597,98 +731,155 @@ export default function Onboarding() {
         <div className="animate-fadeIn">
           <div className="mb-8">
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Operators</h2>
-            <p className="text-gray-600">Add team members who will operate the system</p>
+            <p className="text-gray-600">Add team members who will operate each location</p>
           </div>
-          <div className="space-y-6">
-            {data.collaborators.map((col, i) => (
-              <div key={i} className="p-6 bg-gradient-to-br from-gray-50 to-indigo-50/30 border-2 border-gray-200 rounded-xl space-y-4 hover:shadow-md transition-all">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="font-semibold text-gray-700">Operator {i + 1}</h3>
-                  <div className="w-8 h-8 bg-indigo-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
-                    {i + 1}
-                  </div>
-                </div>
-                <div className="group">
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    Contact Type
-                  </label>
-                  <div className="relative">
-                    <select
-                      value={col.contactType}
-                      onChange={(e) => updateCollaborator(i, 'contactType', e.target.value as 'phone' | 'email')}
-                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 transition-all outline-none bg-white appearance-none cursor-pointer"
+          <div className="space-y-4">
+            {data.locations.map((location, locationIndex) => {
+              const isExpanded = expandedLocations.has(locationIndex)
+              return (
+                <div key={locationIndex} className="border-2 border-gray-200 rounded-xl overflow-hidden">
+                  {/* Accordion Header */}
+                  <div 
+                    className="flex items-center justify-between p-4 bg-gradient-to-r from-indigo-50 to-purple-50 hover:from-indigo-100 hover:to-purple-100 cursor-pointer transition-all"
+                    onClick={() => toggleLocationAccordion(locationIndex)}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-6 h-6 rounded-full transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
+                        <svg className="w-full h-full text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </div>
+                      <h3 className="text-lg font-semibold text-gray-800">{location.name || `Location ${locationIndex + 1}`}</h3>
+                      <div className="px-2 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs font-medium">
+                        {location.collaborators.length} operator{location.collaborators.length !== 1 ? 's' : ''}
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        addCollaborator(locationIndex)
+                      }}
+                      className="w-8 h-8 bg-indigo-500 hover:bg-indigo-600 text-white rounded-full flex items-center justify-center transition-colors group"
+                      title="Add operator to this location"
                     >
-                      <option value="phone">📱 Phone</option>
-                      <option value="email">📧 Email</option>
-                    </select>
-                    <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
-                      <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      <svg className="w-4 h-4 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                       </svg>
-                    </div>
+                    </button>
                   </div>
-                </div>
-                <div className="group">
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    {col.contactType === 'phone' ? 'WhatsApp Number' : 'Email Address'}
-                  </label>
-                  {col.contactType === 'phone' ? (
-                    <div className="flex gap-2">
-                      <select
-                        value={col.countryCode || '+1'}
-                        onChange={(e) => updateCollaborator(i, 'countryCode', e.target.value)}
-                        className="w-20 sm:w-28 px-2 sm:px-3 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 transition-all outline-none bg-white appearance-none cursor-pointer text-sm font-medium"
-                      >
-                        <option value="+1">🇺🇸 +1</option>
-                        <option value="+52">🇲🇽 +52</option>
-                        <option value="+44">🇬🇧 +44</option>
-                        <option value="+34">🇪🇸 +34</option>
-                        <option value="+33">🇫🇷 +33</option>
-                        <option value="+49">🇩🇪 +49</option>
-                        <option value="+39">🇮🇹 +39</option>
-                        <option value="+55">🇧🇷 +55</option>
-                        <option value="+54">🇦🇷 +54</option>
-                        <option value="+57">🇨🇴 +57</option>
-                        <option value="+56">🇨🇱 +56</option>
-                        <option value="+51">🇵🇪 +51</option>
-                        <option value="+58">🇻🇪 +58</option>
-                        <option value="+593">🇪🇨 +593</option>
-                        <option value="+506">🇨🇷 +506</option>
-                        <option value="+507">🇵🇦 +507</option>
-                      </select>
-                      <input
-                        type="tel"
-                        placeholder="555 000 0000"
-                        value={col.contactValue}
-                        onChange={(e) => {
-                          // Only allow numbers and spaces
-                          const value = e.target.value.replace(/[^\d\s]/g, '')
-                          updateCollaborator(i, 'contactValue', value)
-                        }}
-                        className="flex-1 min-w-0 px-3 sm:px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 transition-all outline-none bg-white"
-                      />
+
+                  {/* Accordion Content */}
+                  {isExpanded && (
+                    <div className="p-6 bg-white space-y-4 border-t border-gray-200">
+                      {location.collaborators.length === 0 ? (
+                        <div className="text-center py-8 text-gray-500">
+                          <svg className="w-12 h-12 mx-auto mb-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                          </svg>
+                          <p className="font-medium">No operators added yet</p>
+                          <p className="text-sm">Click the + button above to add operators for this location</p>
+                        </div>
+                      ) : (
+                        location.collaborators.map((col, colIndex) => (
+                          <div key={colIndex} className="p-4 bg-gradient-to-br from-gray-50 to-indigo-50/30 border-2 border-gray-200 rounded-lg space-y-4">
+                            <div className="flex items-center justify-between mb-2">
+                              <h4 className="font-semibold text-gray-700">Operator {colIndex + 1}</h4>
+                              <div className="flex items-center gap-2">
+                                {location.collaborators.length > 1 && (
+                                  <button
+                                    onClick={() => removeCollaborator(locationIndex, colIndex)}
+                                    className="w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center text-sm font-bold transition-colors group"
+                                    title="Remove operator"
+                                  >
+                                    <svg className="w-3 h-3 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                  </button>
+                                )}
+                                <div className="w-6 h-6 bg-indigo-500 text-white rounded-full flex items-center justify-center text-xs font-bold">
+                                  {colIndex + 1}
+                                </div>
+                              </div>
+                            </div>
+                            
+                            <div className="group">
+                              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                                Contact Type
+                              </label>
+                              <div className="relative">
+                                <select
+                                  value={col.contactType}
+                                  onChange={(e) => updateCollaborator(locationIndex, colIndex, 'contactType', e.target.value as 'phone' | 'email')}
+                                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 transition-all outline-none bg-white appearance-none cursor-pointer"
+                                >
+                                  <option value="phone">📱 Phone</option>
+                                  <option value="email">📧 Email</option>
+                                </select>
+                                <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
+                                  <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                  </svg>
+                                </div>
+                              </div>
+                            </div>
+                            
+                            <div className="group">
+                              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                                {col.contactType === 'phone' ? 'WhatsApp Number' : 'Email Address'}
+                              </label>
+                              {col.contactType === 'phone' ? (
+                                <div className="flex gap-2">
+                                  <select
+                                    value={col.countryCode || '+1'}
+                                    onChange={(e) => updateCollaborator(locationIndex, colIndex, 'countryCode', e.target.value)}
+                                    className="w-20 sm:w-28 px-2 sm:px-3 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 transition-all outline-none bg-white appearance-none cursor-pointer text-sm font-medium"
+                                  >
+                                    <option value="+1">🇺🇸 +1</option>
+                                    <option value="+52">🇲🇽 +52</option>
+                                    <option value="+44">🇬🇧 +44</option>
+                                    <option value="+34">🇪🇸 +34</option>
+                                    <option value="+33">🇫🇷 +33</option>
+                                    <option value="+49">🇩🇪 +49</option>
+                                    <option value="+39">🇮🇹 +39</option>
+                                    <option value="+55">🇧🇷 +55</option>
+                                    <option value="+54">🇦🇷 +54</option>
+                                    <option value="+57">🇨🇴 +57</option>
+                                    <option value="+56">🇨🇱 +56</option>
+                                    <option value="+51">🇵🇪 +51</option>
+                                    <option value="+58">🇻🇪 +58</option>
+                                    <option value="+593">🇪🇨 +593</option>
+                                    <option value="+506">🇨🇷 +506</option>
+                                    <option value="+507">🇵🇦 +507</option>
+                                  </select>
+                                  <input
+                                    type="tel"
+                                    placeholder="555 000 0000"
+                                    value={col.contactValue}
+                                    onChange={(e) => {
+                                      const value = e.target.value.replace(/[^\d\s]/g, '')
+                                      updateCollaborator(locationIndex, colIndex, 'contactValue', value)
+                                    }}
+                                    className="flex-1 min-w-0 px-3 sm:px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 transition-all outline-none bg-white"
+                                  />
+                                </div>
+                              ) : (
+                                <input
+                                  type="email"
+                                  placeholder="operator@example.com"
+                                  value={col.contactValue}
+                                  onChange={(e) => updateCollaborator(locationIndex, colIndex, 'contactValue', e.target.value)}
+                                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 transition-all outline-none bg-white"
+                                />
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      )}
                     </div>
-                  ) : (
-                    <input
-                      type="email"
-                      placeholder="operator@example.com"
-                      value={col.contactValue}
-                      onChange={(e) => updateCollaborator(i, 'contactValue', e.target.value)}
-                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 transition-all outline-none bg-white"
-                    />
                   )}
                 </div>
-              </div>
-            ))}
-            <button
-              onClick={addCollaborator}
-              className="w-full py-4 border-2 border-dashed border-gray-300 rounded-xl text-gray-600 hover:border-indigo-500 hover:text-indigo-500 hover:bg-indigo-50 transition-all font-medium flex items-center justify-center gap-2 group"
-            >
-              <svg className="w-5 h-5 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              Add Operator
-            </button>
+              )
+            })}
           </div>
         </div>
       )}

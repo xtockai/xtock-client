@@ -101,7 +101,6 @@ xtock-client/
 - `location_id` (UUID, FK)
 - `contact_type` (TEXT) - 'phone' or 'email'
 - `contact_value` (TEXT)
-- `country_code` (TEXT) - For phone numbers
 - `created_at` (TIMESTAMPTZ)
 
 #### `credentials`
