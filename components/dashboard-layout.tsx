@@ -3,6 +3,8 @@
 import { UserButton } from "@clerk/nextjs"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import Image from 'next/image'
+import logo from '../app/_template/images/logo.png'
 
 export default function DashboardLayout({
   children,
@@ -24,8 +26,9 @@ export default function DashboardLayout({
           <div className="flex justify-between items-center h-16">
             {/* Logo */}
             <div className="flex items-center gap-8">
-              <Link href="/" className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-500 to-indigo-600">
-                Xtock
+              <Link href="/" className="flex items-center">
+                <Image src={'/logo1.png'} alt="Xtock" width={40} height={40} className="object-contain" />
+                <span className="text-2xl font-bold text-gray-800 bg-clip-text mt-1">tock</span>
               </Link>
 
               {/* Navigation */}
@@ -38,7 +41,7 @@ export default function DashboardLayout({
                       href={item.href}
                       className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                         isActive
-                          ? 'bg-blue-50 text-blue-600'
+                          ? 'bg-gray-200 text-blue-800'
                           : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                       }`}
                     >

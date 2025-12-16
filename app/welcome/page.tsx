@@ -1,10 +1,6 @@
 'use client'
 
 import { SignedIn, SignedOut, SignIn, useOrganizationList } from "@clerk/nextjs";
-import { LandingHero } from "../_template/components/landing-hero";
-import { LearnMore } from "../_template/components/learn-more";
-import { Footer } from "../_template/components/footer";
-import { CARDS } from "../_template/content/cards";
 import Onboarding from "../../components/onboarding";
 
 export default function WelcomePage() {
