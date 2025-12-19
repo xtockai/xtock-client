@@ -29,7 +29,7 @@ interface Collaborator {
 
 export default function Onboarding() {
   const { user } = useUser()
-  const { userMemberships, createOrganization } = useOrganizationList({
+  const { userMemberships, createOrganization, isLoaded } = useOrganizationList({
     userMemberships: {
       infinite: true,
     },
@@ -47,6 +47,11 @@ export default function Onboarding() {
     locations: [] as Location[],
     apiKey: ''
   })
+
+  // Check if all locations have at least one operator
+  const allLocationsHaveOperators = () => {
+    return data.locations.length > 0 && data.locations.every(location => location.collaborators.length > 0)
+  }
 
   const hasChecked = useRef(false)
 
@@ -69,11 +74,19 @@ export default function Onboarding() {
     const check = async () => {
       // Prevent multiple executions
       if (hasChecked.current) return
+      
+      // Wait for user memberships to load
+      if (!isLoaded) {
+        console.log('🔍 ONBOARDING: Still loading, waiting...')
+        return
+      }
+      
       console.log('🔍 ONBOARDING: Starting check...')
       console.log('🔍 ONBOARDING: userMemberships ', userMemberships)
 
+      // Only check for no memberships after isLoaded is true
       if (!userMemberships?.data || userMemberships.data.length === 0) {
-        console.log('🔍 ONBOARDING: No memberships, staying at step 1')
+        console.log('🔍 ONBOARDING: No memberships found, staying at step 1')
         setLoading(false)
         return
       }
@@ -81,7 +94,9 @@ export default function Onboarding() {
       hasChecked.current = true
 
       const clerkOrgId = userMemberships.data[0].organization.id
+      const clerkOrgName = userMemberships.data[0].organization.name
       console.log('🔍 ONBOARDING: Using organization ID:', clerkOrgId)
+      console.log('🔍 ONBOARDING: Organization name from Clerk:', clerkOrgName)
       
       const { data: org, error: orgError } = await supabase
         .from('organizations')
@@ -92,9 +107,14 @@ export default function Onboarding() {
       console.log('🔍 ONBOARDING: Supabase org data:', org)
       console.log('🔍 ONBOARDING: Supabase org error:', orgError)
 
-      // If no organization exists in our DB, stay at step 1
+      // If no organization exists in our DB, but exists in Clerk, prefill form and stay at step 1
       if (!org || orgError) {
-        console.log('🔍 ONBOARDING: No org in DB, staying at step 1')
+        console.log('🔍 ONBOARDING: Organization exists in Clerk but not in Supabase, prefilling form')
+        setData(prev => ({ 
+          ...prev, 
+          orgId: clerkOrgId,
+          orgName: clerkOrgName || '' 
+        }))
         setStep(1)
         setLoading(false)
         return
@@ -189,7 +209,7 @@ export default function Onboarding() {
       })   
     }
     check()
-  }, [userMemberships, router])
+  }, [userMemberships, router, isLoaded])
 
   const handleNext = async () => {
     if (step === 1) {
@@ -200,6 +220,42 @@ export default function Onboarding() {
           return
         }
 
+        // Double check if user already has an organization before creating
+        if (isLoaded && userMemberships?.data && userMemberships.data.length > 0) {
+          console.log('🔍 ONBOARDING: User already has organization, checking if needs Supabase sync')
+          const existingOrgId = userMemberships.data[0].organization.id
+          
+          // If we already have the orgId in state, just try to save to Supabase
+          if (data.orgId === existingOrgId) {
+            console.log('🔍 ONBOARDING: Syncing existing Clerk org to Supabase...')
+            // Try to save to Supabase (will fail if already exists, which is fine)
+            const { error } = await supabase
+              .from('organizations')
+              .insert({
+                id: existingOrgId,
+                name: data.orgName,
+                admin_name: data.adminName,
+                onboarding_completed: false
+              })
+
+            if (error && !error.message.includes('duplicate key')) {
+              console.error('Error syncing organization to Supabase:', error)
+              alert('Failed to sync organization data. Please try again.')
+              return
+            }
+
+            setStep(2)
+            return
+          } else {
+            // Different organization, just move to step 2
+            setData(prev => ({ ...prev, orgId: existingOrgId }))
+            setStep(2)
+            return
+          }
+        }
+
+        console.log('🔍 ONBOARDING: Creating new organization...')
+        
         // Create organization in Clerk
         const clerkOrg = await createOrganization?.({ name: data.orgName })
 
@@ -419,10 +475,17 @@ export default function Onboarding() {
     }))
   }
 
-  const updateLocationAddress = (index: number, address: string, lat?: number, lng?: number) => {
+  const updateLocationAddress = (index: number, address: string, lat?: number, lng?: number, timezone?: string) => {
+    console.log('🏠 Onboarding: updateLocationAddress called:', { index, address, lat, lng, timezone })
     setData(prev => ({
       ...prev,
-      locations: prev.locations.map((loc, i) => i === index ? { ...loc, address, latitude: lat, longitude: lng } : loc)
+      locations: prev.locations.map((loc, i) => i === index ? { 
+        ...loc, 
+        address, 
+        latitude: lat, 
+        longitude: lng,
+        timezone: timezone || 'America/Bogota' // Always use new timezone from address
+      } : loc)
     }))
   }
 
@@ -435,6 +498,13 @@ export default function Onboarding() {
           : loc
       )
     }))
+    
+    // Automatically open the accordion when adding a collaborator
+    setExpandedLocations(prev => {
+      const newSet = new Set(prev)
+      newSet.add(locationIndex)
+      return newSet
+    })
   }
 
   const removeCollaborator = (locationIndex: number, collaboratorIndex: number) => {
@@ -659,42 +729,6 @@ export default function Onboarding() {
                   </div>
                   <div className="group md:flex-1">
                     <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                      Address
-                    </label>
-                    <AddressAutocomplete
-                      value={loc.address}
-                      onChange={(address, lat, lng) => updateLocationAddress(i, address, lat, lng)}
-                      placeholder="123 Main St, City, State"
-                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all outline-none bg-white"
-                    />
-                  </div>
-                </div>
-                <div className="flex gap-4">
-                  <div className="group flex-1">
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                      Timezone
-                    </label>
-                    <div className="relative">
-                      <select
-                        value={loc.timezone}
-                        onChange={(e) => updateLocation(i, 'timezone', e.target.value)}
-                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all outline-none bg-white appearance-none cursor-pointer"
-                      >
-                        {TIMEZONES.map((tz) => (
-                          <option key={tz.value} value={tz.value}>
-                            {tz.label} ({tz.offset})
-                          </option>
-                        ))}
-                      </select>
-                      <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
-                        <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                        </svg>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="group flex-1">
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
                       Kitchen Close Time
                     </label>
                     <div className="relative">
@@ -711,6 +745,17 @@ export default function Onboarding() {
                       </div>
                     </div>
                   </div>
+                </div>
+                <div className="group">
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    Address
+                  </label>
+                  <AddressAutocomplete
+                    value={loc.address}
+                    onChange={(address, lat, lng, timezone) => updateLocationAddress(i, address, lat, lng, timezone)}
+                    placeholder="123 Main St, City, State"
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all outline-none bg-white"
+                  />
                 </div>
               </div>
             ))}
@@ -732,6 +777,16 @@ export default function Onboarding() {
           <div className="mb-8">
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Operators</h2>
             <p className="text-gray-600">Add team members who will operate each location</p>
+            {data.locations.length > 0 && !allLocationsHaveOperators() && (
+              <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <div className="flex items-center gap-2 text-amber-800">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                  </svg>
+                  <span className="text-sm font-medium">Each location must have at least one operator to continue</span>
+                </div>
+              </div>
+            )}
           </div>
           <div className="space-y-4">
             {data.locations.map((location, locationIndex) => {
@@ -887,7 +942,7 @@ export default function Onboarding() {
       {step === 4 && (
         <div className="animate-fadeIn">
           <div className="mb-4">
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">POA Provider</h2>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">POS Provider</h2>
             <p className="text-gray-600">Connect your point-of-sale system</p>
           </div>
           <div className="space-y-6">
@@ -970,7 +1025,12 @@ export default function Onboarding() {
               )}
               <button
                 onClick={handleNext}
-                className="px-8 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl font-semibold hover:from-blue-600 hover:to-indigo-700 transition-all shadow-lg hover:shadow-xl transform hover:scale-105 flex items-center gap-2 group"
+                disabled={step === 3 && !allLocationsHaveOperators()}
+                className={`px-8 py-3 rounded-xl font-semibold transition-all shadow-lg flex items-center gap-2 group ${
+                  step === 3 && !allLocationsHaveOperators() 
+                    ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
+                    : 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white hover:from-blue-600 hover:to-indigo-700 hover:shadow-xl transform hover:scale-105'
+                }`}
               >
                 {step === 4 ? (
                   <>

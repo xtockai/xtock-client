@@ -115,35 +115,86 @@ export function convertUTCToLocalTime(
  */
 function getTimezoneOffset(timezone: string, date: Date): number {
   try {
-    // Use Intl.DateTimeFormat for more reliable timezone offset calculation
-    const formatter = new Intl.DateTimeFormat("en-US", {
+    // Use the most straightforward approach with getTimezoneOffset
+    // Create two dates: one in UTC, one in the target timezone
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const day = date.getDate();
+    const hours = date.getHours();
+    const minutes = date.getMinutes();
+
+    // Create a date object that represents the same "wall clock time" in the target timezone
+    const timeString = `${year}-${String(month + 1).padStart(2, "0")}-${String(
+      day
+    ).padStart(2, "0")}T${String(hours).padStart(2, "0")}:${String(
+      minutes
+    ).padStart(2, "0")}:00`;
+
+    // Get what this time would be in the target timezone
+    const tempDate = new Date(timeString);
+    const utcTime = tempDate.getTime();
+
+    // Get what this same "wall clock time" would be in the target timezone
+    const targetFormatter = new Intl.DateTimeFormat("sv-SE", {
       timeZone: timezone,
-      timeZoneName: "short",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
     });
 
-    // Get the timezone name and extract offset
-    const parts = formatter.formatToParts(date);
-    const tzNamePart = parts.find((part) => part.type === "timeZoneName");
+    const utcFormatter = new Intl.DateTimeFormat("sv-SE", {
+      timeZone: "UTC",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
 
-    if (tzNamePart) {
-      // Try to extract offset from timezone name (e.g., "EST", "EDT", "GMT+5")
-      const tzName = tzNamePart.value;
-      const offsetMatch = tzName.match(/GMT([+-]\d+)/);
-      if (offsetMatch) {
-        return parseInt(offsetMatch[1]) * 60;
-      }
-    }
+    // Format the same moment in both timezones
+    const targetTimeStr = targetFormatter.format(date);
+    const utcTimeStr = utcFormatter.format(date);
 
-    // Fallback: calculate offset by comparing UTC time with local time
-    const utcTime = date.getTime();
-    const localTime = date.toLocaleString("en-US", { timeZone: timezone });
-    const localDate = new Date(localTime);
-    const offset = (localDate.getTime() - utcTime) / 60000;
+    // Parse back to get timestamps
+    const targetTime = new Date(targetTimeStr).getTime();
+    const utcTimeParsed = new Date(utcTimeStr).getTime();
 
-    return Math.round(offset);
+    // Calculate the offset in minutes
+    const offsetMs = targetTime - utcTimeParsed;
+    const offsetMinutes = offsetMs / (1000 * 60);
+
+    console.log(`🌍 Timezone offset calculation for ${timezone}:`, {
+      targetTimeStr,
+      utcTimeStr,
+      offsetMinutes,
+    });
+
+    return Math.round(offsetMinutes);
   } catch (error) {
-    console.warn(`Failed to get timezone offset for ${timezone}, using 0`);
-    return 0;
+    console.warn(`Failed to get timezone offset for ${timezone}:`, error);
+
+    // Reliable fallbacks for common timezones
+    const fallbackOffsets: { [key: string]: number } = {
+      "America/New_York": -300, // EST: UTC-5
+      "America/Chicago": -360, // CST: UTC-6
+      "America/Denver": -420, // MST: UTC-7
+      "America/Los_Angeles": -480, // PST: UTC-8
+      "America/Miami": -300, // EST: UTC-5 (Miami is Eastern Time)
+      "America/Bogota": -300, // COT: UTC-5
+      UTC: 0,
+      "Europe/London": 0, // GMT: UTC+0 (winter)
+      "Europe/Paris": 60, // CET: UTC+1 (winter)
+    };
+
+    const fallbackOffset = fallbackOffsets[timezone] || 0;
+    console.log(
+      `🌍 Using fallback offset for ${timezone}: ${fallbackOffset} minutes`
+    );
+    return fallbackOffset;
   }
 }
 

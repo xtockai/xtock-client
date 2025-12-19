@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { convertLocalTimeToTIMETZ, extractTimezoneFromTIMETZ, getUserTimezone, TIMEZONES } from '@/lib/timezones'
+import AddressAutocomplete from '@/components/address-autocomplete'
 
 interface Location {
   id: string
@@ -59,6 +60,9 @@ export default function LocationDetailPage() {
 
   const [editFormData, setEditFormData] = useState({
     name: '',
+    address: '',
+    latitude: undefined as number | undefined,
+    longitude: undefined as number | undefined,
     timezone: getUserTimezone(),
     kitchenClose: ''
   })
@@ -122,6 +126,9 @@ export default function LocationDetailPage() {
 
     setEditFormData({
       name: location.name,
+      address: location.address,
+      latitude: undefined,
+      longitude: undefined,
       timezone: extractedTimezone,
       kitchenClose: timeForInput
     })
@@ -132,25 +139,61 @@ export default function LocationDetailPage() {
     setShowEditModal(false)
     setEditFormData({
       name: '',
+      address: '',
+      latitude: undefined,
+      longitude: undefined,
       timezone: getUserTimezone(),
       kitchenClose: ''
     })
   }
 
+  const handleAddressChange = (address: string, lat?: number, lng?: number, timezone?: string) => {
+    console.log('🏠 Location Detail: handleAddressChange called:', { address, lat, lng, timezone })
+    
+    setEditFormData(prev => {
+      const isTimezoneUpdate = timezone && prev.timezone !== timezone
+      if (isTimezoneUpdate) {
+        console.log('🌍 Location Detail: Timezone updated during edit:', { 
+          from: prev.timezone, 
+          to: timezone,
+          location: location?.name 
+        })
+      }
+      
+      return {
+        ...prev,
+        address,
+        latitude: lat,
+        longitude: lng,
+        // Always update timezone when address changes
+        timezone: timezone || prev.timezone
+      }
+    })
+  }
+
   const handleUpdateLocation = async () => {
-    if (!editFormData.name || !editFormData.kitchenClose) {
+    if (!editFormData.name || !editFormData.kitchenClose || !editFormData.address) {
       alert('Please fill in all fields')
       return
     }
 
     setSaving(true)
     try {
+      const updateData: any = {
+        name: editFormData.name,
+        address: editFormData.address,
+        kitchen_close: convertLocalTimeToTIMETZ(editFormData.kitchenClose, editFormData.timezone)
+      }
+
+      // Include latitude and longitude if available
+      if (editFormData.latitude && editFormData.longitude) {
+        updateData.latitude = editFormData.latitude
+        updateData.longitude = editFormData.longitude
+      }
+
       const { error } = await supabase
         .from('locations')
-        .update({
-          name: editFormData.name,
-          kitchen_close: convertLocalTimeToTIMETZ(editFormData.kitchenClose, editFormData.timezone)
-        })
+        .update(updateData)
         .eq('id', locationId)
 
       if (error) {
@@ -488,36 +531,25 @@ export default function LocationDetailPage() {
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Timezone
-                </label>
-                <div className="relative">
-                  <select
-                    value={editFormData.timezone}
-                    onChange={(e) => setEditFormData({ ...editFormData, timezone: e.target.value })}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-0 transition-colors appearance-none cursor-pointer"
-                  >
-                    {TIMEZONES.map((tz) => (
-                      <option key={tz.value} value={tz.value}>
-                        {tz.label} ({tz.offset})
-                      </option>
-                    ))}
-                  </select>
-                  <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
-                    <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Kitchen Closing Time ({TIMEZONES.find(tz => tz.value === editFormData.timezone)?.label || 'Local time'})
+                  Kitchen Closing Time
                 </label>
                 <input
                   type="time"
                   value={editFormData.kitchenClose}
                   onChange={(e) => setEditFormData({ ...editFormData, kitchenClose: e.target.value })}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-0 transition-colors"
+                />
+                <p className="text-xs text-gray-500 mt-1">Time will be saved with timezone automatically based on address</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Address
+                </label>
+                <AddressAutocomplete
+                  value={editFormData.address}
+                  onChange={handleAddressChange}
+                  placeholder="e.g., 123 Main St, City"
                   className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-0 transition-colors"
                 />
               </div>

@@ -54,13 +54,28 @@ export default function LocationsPage() {
 
   const orgId = userMemberships?.data?.[0]?.organization?.id
 
-  const handleAddressChange = (address: string, lat?: number, lng?: number) => {
-    setFormData(prev => ({
-      ...prev,
-      address,
-      latitude: lat,
-      longitude: lng
-    }))
+  const handleAddressChange = (address: string, lat?: number, lng?: number, timezone?: string) => {
+    console.log('🏠 Locations: handleAddressChange called:', { address, lat, lng, timezone })
+    
+    setFormData(prev => {
+      const isTimezoneUpdate = timezone && prev.timezone !== timezone
+      if (isTimezoneUpdate && editingLocation) {
+        console.log('🌍 Locations: Timezone updated during edit:', { 
+          from: prev.timezone, 
+          to: timezone,
+          location: editingLocation.name 
+        })
+      }
+      
+      return {
+        ...prev,
+        address,
+        latitude: lat,
+        longitude: lng,
+        // Always update timezone when address changes (both create and edit modes)
+        timezone: timezone || prev.timezone || 'America/Bogota'
+      }
+    })
   }
 
   useEffect(() => {
@@ -314,44 +329,7 @@ export default function LocationsPage() {
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Address
-                </label>
-                <AddressAutocomplete
-                  value={formData.address}
-                  onChange={handleAddressChange}
-                  placeholder="e.g., 123 Main St, City"
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-0 transition-colors"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Timezone
-                </label>
-                <div className="relative">
-                  <select
-                    key={`timezone-${editingLocation?.id || 'new'}-${formData.timezone}`}
-                    value={formData.timezone}
-                    onChange={(e) => setFormData({ ...formData, timezone: e.target.value })}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-0 transition-colors appearance-none cursor-pointer"
-                  >
-                    {TIMEZONES.map((tz) => (
-                      <option key={tz.value} value={tz.value}>
-                        {tz.label} ({tz.offset})
-                      </option>
-                    ))}
-                  </select>
-                  <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
-                    <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Kitchen Close Time ({TIMEZONES.find(tz => tz.value === formData.timezone)?.label || 'Local time'})
+                  Kitchen Close Time
                 </label>
                 <div className="relative">
                   <input
@@ -364,7 +342,19 @@ export default function LocationsPage() {
                     🕐
                   </div>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">Time in Eastern timezone, saved in UTC automatically</p>
+                <p className="text-xs text-gray-500 mt-1">Time will be saved with timezone automatically based on address</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Address
+                </label>
+                <AddressAutocomplete
+                  value={formData.address}
+                  onChange={handleAddressChange}
+                  placeholder="e.g., 123 Main St, City"
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-0 transition-colors"
+                />
               </div>
             </div>
 
