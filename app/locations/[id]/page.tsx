@@ -206,6 +206,9 @@ export default function LocationDetailPage() {
       setShowEditModal(false)
       setEditFormData({
         name: '',
+        address: '',
+        latitude: undefined,
+        longitude: undefined,
         timezone: getUserTimezone(),
         kitchenClose: ''
       })
