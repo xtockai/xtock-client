@@ -12,6 +12,9 @@ interface Location {
   name: string
   address: string
   kitchen_close: string
+  restaurant_type?: string
+  restaurant_size?: string
+  cuisine_type?: string
   operator_count?: number
 }
 
@@ -22,6 +25,9 @@ interface LocationFormData {
   longitude?: number
   timezone: string
   kitchenClose: string
+  restaurant_type?: string
+  restaurant_size?: string
+  cuisine_type?: string
 }
 
 export default function LocationsPage() {
@@ -49,7 +55,10 @@ export default function LocationsPage() {
     latitude: undefined,
     longitude: undefined,
     timezone: 'America/New_York',
-    kitchenClose: ''
+    kitchenClose: '',
+    restaurant_type: '',
+    restaurant_size: '',
+    cuisine_type: ''
   })
 
   const orgId = userMemberships?.data?.[0]?.organization?.id
@@ -145,7 +154,10 @@ export default function LocationsPage() {
       latitude: undefined, // You might want to store and load these from DB
       longitude: undefined,
       timezone: extractedTimezone,
-      kitchenClose: timeForInput
+      kitchenClose: timeForInput,
+      restaurant_type: location.restaurant_type || '',
+      restaurant_size: location.restaurant_size || '',
+      cuisine_type: location.cuisine_type || ''
     })
     setShowModal(true)
   }
@@ -167,7 +179,10 @@ export default function LocationsPage() {
             address: formData.address,
             latitude: formData.latitude,
             longitude: formData.longitude,
-            kitchen_close: convertLocalTimeToTIMETZ(formData.kitchenClose, formData.timezone)
+            kitchen_close: convertLocalTimeToTIMETZ(formData.kitchenClose, formData.timezone),
+            restaurant_type: formData.restaurant_type || null,
+            restaurant_size: formData.restaurant_size || null,
+            cuisine_type: formData.cuisine_type || null
           })
           .eq('id', editingLocation.id)
 
@@ -184,7 +199,10 @@ export default function LocationsPage() {
           address: formData.address,
           latitude: formData.latitude,
           longitude: formData.longitude,
-          kitchen_close: convertLocalTimeToTIMETZ(formData.kitchenClose, formData.timezone)
+          kitchen_close: convertLocalTimeToTIMETZ(formData.kitchenClose, formData.timezone),
+          restaurant_type: formData.restaurant_type || null,
+          restaurant_size: formData.restaurant_size || null,
+          cuisine_type: formData.cuisine_type || null
         })
 
         if (error) {
@@ -195,7 +213,17 @@ export default function LocationsPage() {
       }
 
       // Reset form and close modal
-      setFormData({ name: '', address: '', latitude: undefined, longitude: undefined, timezone: 'America/New_York', kitchenClose: '' })
+      setFormData({ 
+        name: '', 
+        address: '', 
+        latitude: undefined, 
+        longitude: undefined, 
+        timezone: 'America/New_York', 
+        kitchenClose: '',
+        restaurant_type: '',
+        restaurant_size: '',
+        cuisine_type: ''
+      })
       setEditingLocation(null)
       setShowModal(false)
 
@@ -355,6 +383,78 @@ export default function LocationsPage() {
                   placeholder="e.g., 123 Main St, City"
                   className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-0 transition-colors"
                 />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Restaurant Type
+                  </label>
+                  <select
+                    value={formData.restaurant_type || ''}
+                    onChange={(e) => setFormData({ ...formData, restaurant_type: e.target.value })}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-0 transition-colors"
+                  >
+                    <option value="">Select type</option>
+                    <option value="fast_food">Fast Food</option>
+                    <option value="casual_dining">Casual Dining</option>
+                    <option value="fine_dining">Fine Dining</option>
+                    <option value="cafe">Cafe</option>
+                    <option value="food_truck">Food Truck</option>
+                    <option value="bakery">Bakery</option>
+                    <option value="bar">Bar</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Restaurant Size
+                  </label>
+                  <select
+                    value={formData.restaurant_size || ''}
+                    onChange={(e) => setFormData({ ...formData, restaurant_size: e.target.value })}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-0 transition-colors"
+                  >
+                    <option value="">Select size</option>
+                    <option value="small">Small</option>
+                    <option value="medium">Medium</option>
+                    <option value="large">Large</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Cuisine Type
+                </label>
+                <select
+                  value={formData.cuisine_type || ''}
+                  onChange={(e) => setFormData({ ...formData, cuisine_type: e.target.value })}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-0 transition-colors"
+                >
+                  <option value="">Select cuisine</option>
+                  <option value="italian">Italian</option>
+                  <option value="mexican">Mexican</option>
+                  <option value="american">American</option>
+                  <option value="asian">Asian</option>
+                  <option value="indian">Indian</option>
+                  <option value="mediterranean">Mediterranean</option>
+                  <option value="french">French</option>
+                  <option value="japanese">Japanese</option>
+                  <option value="chinese">Chinese</option>
+                  <option value="thai">Thai</option>
+                  <option value="vietnamese">Vietnamese</option>
+                  <option value="korean">Korean</option>
+                  <option value="greek">Greek</option>
+                  <option value="spanish">Spanish</option>
+                  <option value="brazilian">Brazilian</option>
+                  <option value="peruvian">Peruvian</option>
+                  <option value="colombian">Colombian</option>
+                  <option value="fusion">Fusion</option>
+                  <option value="international">International</option>
+                  <option value="other">Other</option>
+                </select>
               </div>
             </div>
 

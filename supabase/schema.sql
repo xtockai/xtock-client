@@ -16,8 +16,16 @@ CREATE TABLE IF NOT EXISTS locations (
   latitude DECIMAL(10, 8),
   longitude DECIMAL(11, 8),
   kitchen_close TIMETZ NOT NULL, -- Time with timezone
+  restaurant_type TEXT CHECK (restaurant_type IN ('fast_food', 'casual_dining', 'fine_dining', 'cafe', 'food_truck', 'bakery', 'bar', 'other')),
+  restaurant_size TEXT CHECK (restaurant_size IN ('small', 'medium', 'large')),
+  cuisine_type TEXT CHECK (cuisine_type IN ('italian', 'mexican', 'american', 'asian', 'indian', 'mediterranean', 'french', 'japanese', 'chinese', 'thai', 'vietnamese', 'korean', 'greek', 'spanish', 'brazilian', 'peruvian', 'colombian', 'fusion', 'international', 'other')),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Add comments to describe the new columns
+COMMENT ON COLUMN public.locations.restaurant_type IS 'Type: fast_food, casual_dining, fine_dining, cafe, etc.';
+COMMENT ON COLUMN public.locations.restaurant_size IS 'Size: small, medium, large';
+COMMENT ON COLUMN public.locations.cuisine_type IS 'Cuisine: italian, mexican, american, asian, etc.';
 
 -- Collaborators (operators) table
 CREATE TABLE IF NOT EXISTS collaborators (

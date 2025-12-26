@@ -9,6 +9,7 @@ import { Footer } from "../app/_template/components/footer";
 import { CARDS } from "../app/_template/content/cards";
 import LoadingComponent from './loading'
 import AddressAutocomplete from './address-autocomplete'
+import CSVUpload from './csv-upload'
 import { convertLocalTimeToTIMETZ, extractTimezoneFromTIMETZ, getUserTimezone, TIMEZONES } from '@/lib/timezones'
 
 interface Location {
@@ -18,6 +19,9 @@ interface Location {
   longitude?: number
   timezone: string
   kitchenClose: string
+  restaurant_type?: string
+  restaurant_size?: string
+  cuisine_type?: string
   collaborators: Collaborator[] // Add collaborators to each location
 }
 
@@ -26,6 +30,18 @@ interface Collaborator {
   contactValue: string
   countryCode?: string
 }
+
+interface CSVData {
+  date: string
+  item: string
+  quantity: number
+}
+
+interface LocationCSVData {
+  [locationId: string]: CSVData[]
+}
+
+type POSProvider = 'toast' | 'manual'
 
 export default function Onboarding() {
   const { user } = useUser()
@@ -45,13 +61,28 @@ export default function Onboarding() {
     adminName: user?.fullName || '',
     orgId: '',
     locations: [] as Location[],
-    apiKey: ''
+    apiKey: '',
+    posProvider: 'toast' as POSProvider,
+    csvData: {} as LocationCSVData
   })
+  const [csvUploadStates, setCsvUploadStates] = useState<{[locationId: string]: boolean}>({})
+  const [csvErrors, setCsvErrors] = useState<{[locationId: string]: string}>({})
 
   // Check if all locations have at least one operator
   const allLocationsHaveOperators = () => {
     return data.locations.length > 0 && data.locations.every(location => location.collaborators.length > 0)
   }
+
+  // Automatically open first location accordion when selecting manual mode
+  useEffect(() => {
+    if (data.posProvider === 'manual' && data.locations.length > 0) {
+      setExpandedLocations(prev => {
+        const newSet = new Set(prev)
+        newSet.add(0) // Open first location
+        return newSet
+      })
+    }
+  }, [data.posProvider, data.locations.length])
 
   const hasChecked = useRef(false)
 
@@ -180,6 +211,9 @@ export default function Onboarding() {
             longitude: l.longitude,
             timezone: extractedTimezone,
             kitchenClose: timeForInput,
+            restaurant_type: l.restaurant_type || '',
+            restaurant_size: l.restaurant_size || '',
+            cuisine_type: l.cuisine_type || '',
             collaborators: locationCollaborators
           }
         })
@@ -321,7 +355,10 @@ export default function Onboarding() {
             address: loc.address,
             latitude: loc.latitude,
             longitude: loc.longitude,
-            kitchen_close: convertLocalTimeToTIMETZ(loc.kitchenClose, loc.timezone)
+            kitchen_close: convertLocalTimeToTIMETZ(loc.kitchenClose, loc.timezone),
+            restaurant_type: loc.restaurant_type || null,
+            restaurant_size: loc.restaurant_size || null,
+            cuisine_type: loc.cuisine_type || null
           })
 
           if (error) {
@@ -411,22 +448,29 @@ export default function Onboarding() {
       }
     } else if (step === 4) {
       try {
-        // Validate API key
-        if (!data.apiKey) {
-          alert('Please enter your Toast API key')
-          return
-        }
+        if (data.posProvider === 'toast') {
+          // Validate API key for Toast
+          if (!data.apiKey) {
+            alert('Please enter your Toast API key')
+            return
+          }
 
-        // Save credentials
-        const response = await fetch('/api/credentials', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orgId: data.orgId, name: 'toast', apiKey: data.apiKey })
-        })
+          // Save credentials
+          const response = await fetch('/api/credentials', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ orgId: data.orgId, name: 'toast', apiKey: data.apiKey })
+          })
 
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}))
-          throw new Error(errorData.message || 'Failed to save credentials')
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}))
+            throw new Error(errorData.message || 'Failed to save credentials')
+          }
+        } else {
+          // Manual mode - save CSV data if provided
+          if (Object.keys(data.csvData).length > 0) {
+            await saveCsvDataToSalesData()
+          }
         }
 
         // Mark onboarding as completed
@@ -446,6 +490,110 @@ export default function Onboarding() {
     }
   }
 
+  // Function to parse different date formats
+  const parseDate = (dateStr: string): Date => {
+    // Handle YYYYMMDD format (e.g., "20251122")
+    if (/^\d{8}$/.test(dateStr)) {
+      const year = parseInt(dateStr.substring(0, 4))
+      const month = parseInt(dateStr.substring(4, 6)) - 1 // Month is 0-indexed
+      const day = parseInt(dateStr.substring(6, 8))
+      return new Date(year, month, day)
+    }
+    
+    // Handle other standard formats
+    const date = new Date(dateStr)
+    if (isNaN(date.getTime())) {
+      throw new Error(`Invalid date format: ${dateStr}`)
+    }
+    return date
+  }
+
+  // Function to save CSV data to sales_data table
+  const saveCsvDataToSalesData = async () => {
+    try {
+      const { data: locationRecords } = await supabase
+        .from('locations')
+        .select('id, name')
+        .eq('organization_id', data.orgId)
+
+      if (!locationRecords || locationRecords.length === 0) {
+        throw new Error('No locations found')
+      }
+
+      // Prepare sales data records
+      const salesDataRecords = []
+      
+      for (const [locationName, csvRows] of Object.entries(data.csvData)) {
+        const locationRecord = locationRecords.find(loc => loc.name === locationName)
+        if (!locationRecord) continue
+
+        for (const csvRow of csvRows) {
+          // Parse date and convert to timestamp
+          const timestamp = parseDate(csvRow.date).toISOString()
+          
+          salesDataRecords.push({
+            location_id: locationRecord.id,
+            organization_id: data.orgId,
+            timestamp,
+            item: csvRow.item,
+            quantity: csvRow.quantity,
+            revenue_cents: null,
+            provider: 'manual',
+            source: 'csv_upload'
+          })
+        }
+      }
+
+      if (salesDataRecords.length > 0) {
+        const { error } = await supabase
+          .from('sales_data')
+          .insert(salesDataRecords)
+
+        if (error) {
+          throw new Error(`Failed to save sales data: ${error.message}`)
+        }
+      }
+    } catch (error) {
+      console.error('Error saving CSV data to sales_data:', error)
+      throw error
+    }
+  }
+
+  // Handle CSV upload for a location
+  const handleCsvUpload = (csvData: CSVData[], locationName: string) => {
+    setData(prev => ({
+      ...prev,
+      csvData: {
+        ...prev.csvData,
+        [locationName]: csvData
+      }
+    }))
+    
+    setCsvUploadStates(prev => ({
+      ...prev,
+      [locationName]: true
+    }))
+    
+    setCsvErrors(prev => {
+      const newErrors = { ...prev }
+      delete newErrors[locationName]
+      return newErrors
+    })
+  }
+
+  // Handle CSV upload error
+  const handleCsvError = (error: string, locationName: string) => {
+    setCsvErrors(prev => ({
+      ...prev,
+      [locationName]: error
+    }))
+    
+    setCsvUploadStates(prev => ({
+      ...prev,
+      [locationName]: false
+    }))
+  }
+
   const addLocation = () => {
     setData(prev => ({
       ...prev,
@@ -456,6 +604,9 @@ export default function Onboarding() {
         longitude: undefined, 
         timezone: getUserTimezone(), 
         kitchenClose: '',
+        restaurant_type: '',
+        restaurant_size: '',
+        cuisine_type: '',
         collaborators: []
       }]
     }))
@@ -757,6 +908,75 @@ export default function Onboarding() {
                     className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all outline-none bg-white"
                   />
                 </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="group">
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      Restaurant Type
+                    </label>
+                    <select
+                      value={loc.restaurant_type || ''}
+                      onChange={(e) => updateLocation(i, 'restaurant_type', e.target.value)}
+                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all outline-none bg-white"
+                    >
+                      <option value="">Select type</option>
+                      <option value="fast_food">Fast Food</option>
+                      <option value="casual_dining">Casual Dining</option>
+                      <option value="fine_dining">Fine Dining</option>
+                      <option value="cafe">Cafe</option>
+                      <option value="food_truck">Food Truck</option>
+                      <option value="bakery">Bakery</option>
+                      <option value="bar">Bar</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                  <div className="group">
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      Restaurant Size
+                    </label>
+                    <select
+                      value={loc.restaurant_size || ''}
+                      onChange={(e) => updateLocation(i, 'restaurant_size', e.target.value)}
+                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all outline-none bg-white"
+                    >
+                      <option value="">Select size</option>
+                      <option value="small">Small</option>
+                      <option value="medium">Medium</option>
+                      <option value="large">Large</option>
+                    </select>
+                  </div>
+                  <div className="group">
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      Cuisine Type
+                    </label>
+                    <select
+                      value={loc.cuisine_type || ''}
+                      onChange={(e) => updateLocation(i, 'cuisine_type', e.target.value)}
+                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all outline-none bg-white"
+                    >
+                      <option value="">Select cuisine</option>
+                      <option value="italian">Italian</option>
+                      <option value="mexican">Mexican</option>
+                      <option value="american">American</option>
+                      <option value="asian">Asian</option>
+                      <option value="indian">Indian</option>
+                      <option value="mediterranean">Mediterranean</option>
+                      <option value="french">French</option>
+                      <option value="japanese">Japanese</option>
+                      <option value="chinese">Chinese</option>
+                      <option value="thai">Thai</option>
+                      <option value="vietnamese">Vietnamese</option>
+                      <option value="korean">Korean</option>
+                      <option value="greek">Greek</option>
+                      <option value="spanish">Spanish</option>
+                      <option value="brazilian">Brazilian</option>
+                      <option value="peruvian">Peruvian</option>
+                      <option value="colombian">Colombian</option>
+                      <option value="fusion">Fusion</option>
+                      <option value="international">International</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                </div>
               </div>
             ))}
             <button
@@ -943,13 +1163,73 @@ export default function Onboarding() {
         <div className="animate-fadeIn">
           <div className="mb-4">
             <h2 className="text-2xl font-bold text-gray-900 mb-2">POS Provider</h2>
-            <p className="text-gray-600">Connect your point-of-sale system</p>
+            <p className="text-gray-600">Choose how you want to connect your sales data</p>
           </div>
-          <div className="space-y-6">
-            <div className="group">
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Toast API Key
-              </label>
+
+          {/* Provider Selection */}
+          <div className="space-y-6 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Toast Option */}
+              <div
+                className={`cursor-pointer rounded-xl border-2 p-6 transition-all hover:shadow-lg ${
+                  data.posProvider === 'toast'
+                    ? 'border-blue-500 bg-blue-50 shadow-md'
+                    : 'border-gray-300 bg-white hover:border-gray-400'
+                }`}
+                onClick={() => setData(prev => ({ ...prev, posProvider: 'toast' }))}
+              >
+                <div className="flex items-center gap-4">
+                  <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${
+                    data.posProvider === 'toast'
+                      ? 'border-blue-500 bg-blue-500'
+                      : 'border-gray-300'
+                  }`}>
+                    {data.posProvider === 'toast' && (
+                      <div className="w-3 h-3 bg-white rounded-full" />
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-1">I have Toast</h3>
+                    <p className="text-sm text-gray-600">Connect directly to your Toast POS system</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Manual Option */}
+              <div
+                className={`cursor-pointer rounded-xl border-2 p-6 transition-all hover:shadow-lg ${
+                  data.posProvider === 'manual'
+                    ? 'border-blue-500 bg-blue-50 shadow-md'
+                    : 'border-gray-300 bg-white hover:border-gray-400'
+                }`}
+                onClick={() => setData(prev => ({ ...prev, posProvider: 'manual' }))}
+              >
+                <div className="flex items-center gap-4">
+                  <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${
+                    data.posProvider === 'manual'
+                      ? 'border-blue-500 bg-blue-500'
+                      : 'border-gray-300'
+                  }`}>
+                    {data.posProvider === 'manual' && (
+                      <div className="w-3 h-3 bg-white rounded-full" />
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-1">I don't have Toast</h3>
+                    <p className="text-sm text-gray-600">Upload your sales data manually via CSV</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Toast Configuration */}
+          {data.posProvider === 'toast' && (
+            <div className="space-y-6">
+              <div className="group">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Toast API Key <span className="text-red-500">*</span>
+                </label>
               <div className="relative">
                 <input
                   type="password"
@@ -983,26 +1263,97 @@ export default function Onboarding() {
               </div>
             </div>
 
-            <div className="mt-6">
-              <div className="flex items-center gap-2 mb-4">
-                <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <p className="text-sm font-semibold text-gray-700">Quick Setup Guide</p>
+            </div>
+          )}
+
+          {/* Manual Configuration */}
+          {data.posProvider === 'manual' && (
+            <div className="space-y-6">
+              {/* Warning Message */}
+              <div className="flex items-start gap-3 p-4 bg-amber-50 border-2 border-amber-200 rounded-xl">
+                <div className="flex-shrink-0 mt-0.5">
+                  <svg className="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm text-amber-900 font-medium">Important Notice</p>
+                  <p className="text-sm text-amber-800 mt-1">
+                    Without sales data, we won't be able to generate accurate predictions. You can upload CSV files now or add them later from your dashboard.
+                  </p>
+                </div>
               </div>
-              <div className="aspect-video rounded-xl overflow-hidden shadow-lg border-2 border-gray-200">
-                <iframe
-                  className="w-full h-full"
-                  src="https://www.youtube.com/embed/dQw4w9WgXcQ"
-                  title="Toast API Key Setup Guide"
-                  frameBorder="0"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                ></iframe>
+
+              {/* CSV Upload per Location */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-gray-900">Upload Sales Data (Optional)</h3>
+                <p className="text-sm text-gray-600">
+                  Upload historical sales data for each location. CSV files must include columns for: date, quantity, and product/item name.
+                </p>
+                
+                {data.locations.map((location, locationIndex) => {
+                  const isExpanded = expandedLocations.has(locationIndex)
+                  const hasUpload = csvUploadStates[location.name]
+                  const hasError = csvErrors[location.name]
+                  
+                  return (
+                    <div key={locationIndex} className="border-2 border-gray-200 rounded-xl overflow-hidden">
+                      {/* Accordion Header */}
+                      <div 
+                        className="flex items-center justify-between p-4 bg-gradient-to-r from-gray-50 to-blue-50/30 hover:from-gray-100 hover:to-blue-100/50 cursor-pointer transition-all"
+                        onClick={() => toggleLocationAccordion(locationIndex)}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={`w-6 h-6 rounded-full transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
+                            <svg className="w-full h-full text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                            </svg>
+                          </div>
+                          <h4 className="text-lg font-semibold text-gray-800">{location.name}</h4>
+                          
+                          {/* Status indicators */}
+                          {hasUpload && (
+                            <div className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
+                              ✓ Uploaded
+                            </div>
+                          )}
+                          {hasError && (
+                            <div className="px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs font-medium">
+                              ⚠ Error
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Accordion Content */}
+                      {isExpanded && (
+                        <div className="p-6 bg-white border-t border-gray-200">
+                          <CSVUpload
+                            locationId={location.name}
+                            locationName={location.name}
+                            onUpload={handleCsvUpload}
+                            onError={(error) => handleCsvError(error, location.name)}
+                            isUploaded={!!hasUpload}
+                          />
+                          
+                          {hasError && (
+                            <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                              <div className="flex items-center gap-2 text-red-800">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                                </svg>
+                                <span className="text-sm font-medium">{hasError}</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -1025,9 +1376,13 @@ export default function Onboarding() {
               )}
               <button
                 onClick={handleNext}
-                disabled={step === 3 && !allLocationsHaveOperators()}
+                disabled={
+                  (step === 3 && !allLocationsHaveOperators()) ||
+                  (step === 4 && data.posProvider === 'toast' && !data.apiKey)
+                }
                 className={`px-8 py-3 rounded-xl font-semibold transition-all shadow-lg flex items-center gap-2 group ${
-                  step === 3 && !allLocationsHaveOperators() 
+                  (step === 3 && !allLocationsHaveOperators()) ||
+                  (step === 4 && data.posProvider === 'toast' && !data.apiKey)
                     ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
                     : 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white hover:from-blue-600 hover:to-indigo-700 hover:shadow-xl transform hover:scale-105'
                 }`}
