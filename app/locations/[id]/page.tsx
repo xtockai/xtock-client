@@ -6,6 +6,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { convertLocalTimeToTIMETZ, extractTimezoneFromTIMETZ, getUserTimezone, TIMEZONES } from '@/lib/timezones'
 import AddressAutocomplete from '@/components/address-autocomplete'
+import LocationCSVUpload from '@/components/location-csv-upload'
 
 interface Location {
   id: string
@@ -29,6 +30,12 @@ interface OperatorFormData {
   countryCode: string
 }
 
+interface CSVData {
+  date: string
+  item: string
+  quantity: number
+}
+
 export default function LocationDetailPage() {
   const params = useParams()
   const router = useRouter()
@@ -41,6 +48,11 @@ export default function LocationDetailPage() {
   const [showEditModal, setShowEditModal] = useState(false)
   const [saving, setSaving] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
+  const [hasToastApi, setHasToastApi] = useState<boolean | null>(null)
+  const [showCsvUpload, setShowCsvUpload] = useState(false)
+  const [csvUploading, setCsvUploading] = useState(false)
+  const [csvError, setCsvError] = useState<string | null>(null)
+  const [csvSuccess, setCsvSuccess] = useState<string | null>(null)
 
   const formatTime = (time: string) => {
     if (!time) return ''
@@ -96,6 +108,20 @@ export default function LocationDetailPage() {
         ...loc,
         kitchen_close: loc.kitchen_close
       })
+
+      // Check if Toast API key exists for this organization
+      const { data: credentials, error: credError } = await supabase
+        .from('credentials')
+        .select('credential_type')
+        .eq('organization_id', loc.organization_id)
+        .eq('credential_type', 'toast')
+        .maybeSingle()
+
+      if (credError && credError.code !== 'PGRST116') { // PGRST116 is "no rows returned"
+        console.error('Error checking credentials:', credError)
+      }
+
+      setHasToastApi(!!credentials)
 
       // Load operators
       const { data: ops, error: opsError } = await supabase
@@ -263,6 +289,47 @@ export default function LocationDetailPage() {
     }
   }
 
+  // CSV Upload Functions
+  const handleCsvUpload = async (csvData: CSVData[]) => {
+    if (!location) return
+
+    setCsvUploading(true)
+    setCsvError(null)
+    setCsvSuccess(null)
+
+    try {
+      const response = await fetch('/api/upload-csv', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          locationId: location.id,
+          organizationId: location.organization_id,
+          csvData: csvData
+        })
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to upload CSV')
+      }
+
+      setCsvSuccess(`Successfully added ${result.newRecords} new records. ${result.duplicates} duplicates were skipped.`)
+      setShowCsvUpload(false)
+    } catch (error) {
+      console.error('Error uploading CSV:', error)
+      setCsvError(error instanceof Error ? error.message : 'Failed to upload CSV')
+    } finally {
+      setCsvUploading(false)
+    }
+  }
+
+  const handleCsvError = (error: string) => {
+    setCsvError(error)
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -373,6 +440,84 @@ export default function LocationDetailPage() {
             </div>
           )}
         </div>
+
+        {/* Manual Data Upload Section - only show if no Toast API */}
+        {hasToastApi === false && (
+          <div className="bg-white rounded-xl border-2 border-gray-200 overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Sales Data</h2>
+                <p className="text-sm text-gray-500 mt-1">Upload historical sales data manually</p>
+              </div>
+              <button
+                onClick={() => setShowCsvUpload(true)}
+                className="px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl font-semibold hover:from-blue-600 hover:to-indigo-700 hover:shadow-xl transition-all transform hover:scale-105 flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+                Upload CSV
+              </button>
+            </div>
+
+            <div className="px-6 py-8">
+              <div className="text-center">
+                <div className="w-16 h-16 mx-auto bg-green-100 rounded-full flex items-center justify-center mb-4">
+                  <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">Manual Data Upload</h3>
+                <p className="text-gray-600 mb-6 max-w-md mx-auto">
+                  Since no Toast API integration is detected for this organization, you can upload your sales data manually using a CSV file.
+                </p>
+                <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4 mb-6 text-left max-w-md mx-auto">
+                  <h4 className="font-semibold text-blue-900 mb-2">CSV Requirements:</h4>
+                  <ul className="text-sm text-blue-800 space-y-1">
+                    <li>• <strong>Date</strong>: date, timestamp, day, or fecha column</li>
+                    <li>• <strong>Item</strong>: product, name, item, or articulo column</li>
+                    <li>• <strong>Quantity</strong>: quantity, qty, amount, or cantidad column</li>
+                    <li>• Only new data will be added (no duplicates)</li>
+                  </ul>
+                </div>
+                <button
+                  onClick={() => setShowCsvUpload(true)}
+                  className="px-8 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl font-semibold hover:from-blue-600 hover:to-indigo-700 hover:shadow-xl transition-all transform hover:scale-105 flex items-center gap-2 mx-auto"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                  Upload Sales Data
+                </button>
+              </div>
+            </div>
+
+            {/* Success/Error Messages */}
+            {csvSuccess && (
+              <div className="mx-6 mb-6 bg-green-50 border-2 border-green-200 rounded-xl p-4">
+                <div className="flex items-center gap-2">
+                  <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span className="font-semibold text-green-800">Success!</span>
+                </div>
+                <p className="text-green-700 mt-1">{csvSuccess}</p>
+              </div>
+            )}
+
+            {csvError && (
+              <div className="mx-6 mb-6 bg-red-50 border-2 border-red-200 rounded-xl p-4">
+                <div className="flex items-center gap-2">
+                  <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                  <span className="font-semibold text-red-800">Error</span>
+                </div>
+                <p className="text-red-700 mt-1">{csvError}</p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Create Operator Modal */}
@@ -577,6 +722,21 @@ export default function LocationDetailPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* CSV Upload Modal */}
+      {showCsvUpload && location && (
+        <LocationCSVUpload
+          locationName={location.name}
+          onUpload={handleCsvUpload}
+          onError={handleCsvError}
+          onClose={() => {
+            setShowCsvUpload(false)
+            setCsvError(null)
+            setCsvSuccess(null)
+          }}
+          uploading={csvUploading}
+        />
       )}
     </>
   )
