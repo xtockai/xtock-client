@@ -327,7 +327,6 @@ export default function LocationsPage() {
                       <span>Opened: {location.opening_date}</span>
                     </div>
                   )}
-                  </div>
                 </button>
               </div>
             ))}
