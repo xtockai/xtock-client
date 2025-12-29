@@ -19,6 +19,7 @@ interface Location {
   longitude?: number
   timezone: string
   kitchenClose: string
+  openingDate?: string // Fecha de apertura del restaurante
   restaurant_type?: string
   restaurant_size?: string
   cuisine_type?: string
@@ -358,7 +359,8 @@ export default function Onboarding() {
             kitchen_close: convertLocalTimeToTIMETZ(loc.kitchenClose, loc.timezone),
             restaurant_type: loc.restaurant_type || null,
             restaurant_size: loc.restaurant_size || null,
-            cuisine_type: loc.cuisine_type || null
+            cuisine_type: loc.cuisine_type || null,
+            opening_date: loc.openingDate || null
           })
 
           if (error) {
@@ -878,21 +880,52 @@ export default function Onboarding() {
                       className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all outline-none bg-white"
                     />
                   </div>
-                  <div className="group md:flex-1">
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                      Kitchen Close Time
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="time"
-                        value={loc.kitchenClose}
-                        onChange={(e) => updateLocation(i, 'kitchenClose', e.target.value)}
-                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all outline-none bg-white"
-                      />
-                      <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
-                        <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
+                  <div className="group md:flex-1 flex flex-col">
+                    <div className="md:flex md:items-end md:gap-4">
+                      <div className="flex-1">
+                        <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                          Kitchen Close Time
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="time"
+                            value={loc.kitchenClose}
+                            onChange={(e) => updateLocation(i, 'kitchenClose', e.target.value)}
+                            className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all outline-none bg-white"
+                          />
+                          <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
+                            <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex-1 mt-4 md:mt-0">
+                        <div className="flex items-center justify-between">
+                          <label className="block text-sm font-medium text-gray-700 mb-1.5 md:text-right">
+                            Opening Date
+                          </label>
+                          {/* Tooltip only visible on md+ */}
+                          <div className="hidden md:inline-block relative group ml-2">
+                            <svg className="w-4 h-4 text-gray-400 cursor-pointer" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" fill="white" />
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 16v-4m0-4h.01" />
+                            </svg>
+                            <div className="absolute z-20 left-1/2 -translate-x-1/2 mt-2 w-64 px-3 py-2 bg-gray-900 text-white text-xs rounded shadow-lg opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">
+                              Approximate date when the restaurant started operations. This helps us better understand your business history.
+                            </div>
+                          </div>
+                        </div>
+                        <input
+                          type="date"
+                          value={loc.openingDate || ''}
+                          onChange={(e) => updateLocation(i, 'openingDate', e.target.value)}
+                          className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all outline-none bg-white"
+                        />
+                        {/* Visible only on mobile */}
+                        <p className="text-xs text-gray-500 mt-1 md:hidden">
+                          Approximate date when the restaurant started operations. This helps us better understand your business history.
+                        </p>
                       </div>
                     </div>
                   </div>

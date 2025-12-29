@@ -16,6 +16,7 @@ interface Location {
   restaurant_size?: string
   cuisine_type?: string
   operator_count?: number
+  opening_date?: string // Fecha de apertura del restaurante
 }
 
 interface LocationFormData {
@@ -28,6 +29,7 @@ interface LocationFormData {
   restaurant_type?: string
   restaurant_size?: string
   cuisine_type?: string
+  openingDate?: string // Fecha de apertura del restaurante
 }
 
 export default function LocationsPage() {
@@ -58,7 +60,8 @@ export default function LocationsPage() {
     kitchenClose: '',
     restaurant_type: '',
     restaurant_size: '',
-    cuisine_type: ''
+    cuisine_type: '',
+    openingDate: ''
   })
 
   const orgId = userMemberships?.data?.[0]?.organization?.id
@@ -157,7 +160,8 @@ export default function LocationsPage() {
       kitchenClose: timeForInput,
       restaurant_type: location.restaurant_type || '',
       restaurant_size: location.restaurant_size || '',
-      cuisine_type: location.cuisine_type || ''
+      cuisine_type: location.cuisine_type || '',
+      openingDate: location.opening_date || ''
     })
     setShowModal(true)
   }
@@ -182,7 +186,8 @@ export default function LocationsPage() {
             kitchen_close: convertLocalTimeToTIMETZ(formData.kitchenClose, formData.timezone),
             restaurant_type: formData.restaurant_type || null,
             restaurant_size: formData.restaurant_size || null,
-            cuisine_type: formData.cuisine_type || null
+            cuisine_type: formData.cuisine_type || null,
+            opening_date: formData.openingDate || null
           })
           .eq('id', editingLocation.id)
 
@@ -202,7 +207,8 @@ export default function LocationsPage() {
           kitchen_close: convertLocalTimeToTIMETZ(formData.kitchenClose, formData.timezone),
           restaurant_type: formData.restaurant_type || null,
           restaurant_size: formData.restaurant_size || null,
-          cuisine_type: formData.cuisine_type || null
+          cuisine_type: formData.cuisine_type || null,
+          opening_date: formData.openingDate || null
         })
 
         if (error) {
@@ -222,7 +228,8 @@ export default function LocationsPage() {
         kitchenClose: '',
         restaurant_type: '',
         restaurant_size: '',
-        cuisine_type: ''
+        cuisine_type: '',
+        openingDate: ''
       })
       setEditingLocation(null)
       setShowModal(false)
@@ -314,6 +321,13 @@ export default function LocationsPage() {
                     <span>🕐</span>
                     <span>Kitchen closes at {formatTime(location.kitchen_close)}</span>
                   </div>
+                  {location.opening_date && (
+                    <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
+                      <span>📅</span>
+                      <span>Opened: {location.opening_date}</span>
+                    </div>
+                  )}
+                  </div>
                 </button>
               </div>
             ))}
@@ -342,6 +356,17 @@ export default function LocationsPage() {
 
             {/* Modal Body */}
             <div className="px-6 py-6 space-y-4">
+                            <div>
+                              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                Fecha de apertura
+                              </label>
+                              <input
+                                type="date"
+                                value={formData.openingDate || ''}
+                                onChange={(e) => setFormData({ ...formData, openingDate: e.target.value })}
+                                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:ring-0 transition-colors"
+                              />
+                            </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                   Location Name
