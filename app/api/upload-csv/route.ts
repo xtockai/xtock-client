@@ -47,10 +47,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Create a set of existing records for fast lookup
-    // Format: "YYYY-MM-DD|item_name"
+    // Format: "YYYY-MM-DD|item_name" (ignore time part for duplicate detection)
     const existingRecords = new Set<string>();
     if (existingSalesData) {
       existingSalesData.forEach((record) => {
+        // Always extract only the date part (YYYY-MM-DD) for duplicate detection
         const date = new Date(record.timestamp).toISOString().split("T")[0];
         const key = `${date}|${record.item.trim().toLowerCase()}`;
         existingRecords.add(key);
@@ -65,9 +66,10 @@ export async function POST(request: NextRequest) {
       try {
         // Parse and validate date
         const parsedDate = parseDate(csvRow.date);
-        const dateString = parsedDate.toISOString().split("T")[0]; // YYYY-MM-DD format
+        // Always use only the date part (YYYY-MM-DD) for duplicate detection
+        const dateString = parsedDate.toISOString().split("T")[0];
 
-        // Create lookup key
+        // Create lookup key (date only, ignore time)
         const lookupKey = `${dateString}|${csvRow.item.trim().toLowerCase()}`;
 
         // Check if this record already exists
@@ -87,6 +89,8 @@ export async function POST(request: NextRequest) {
           provider: "manual",
           source: "csv_upload",
         });
+        // Add this new record to the set to prevent duplicates within the same upload
+        existingRecords.add(lookupKey);
       } catch (error) {
         console.error("Error processing CSV row:", error, csvRow);
         // Skip invalid rows
