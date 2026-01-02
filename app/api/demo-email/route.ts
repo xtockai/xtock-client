@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
-import twilio from "twilio";
+import { Resend } from "resend";
 
 // Simple forecasting function
 function predictTomorrowSales(
@@ -30,14 +30,14 @@ function predictTomorrowSales(
   return predictions;
 }
 
-// POST /api/demo-whatsapp
+// POST /api/demo-email
 export async function POST(req: NextRequest) {
   try {
-    const { restaurant, phone } = await req.json();
+    const { restaurant, email } = await req.json();
 
-    if (!restaurant || !phone) {
+    if (!restaurant || !email) {
       return NextResponse.json(
-        { success: false, error: "Missing restaurant or phone" },
+        { success: false, error: "Missing restaurant or email" },
         { status: 400 }
       );
     }
@@ -78,88 +78,57 @@ export async function POST(req: NextRequest) {
       day: "numeric",
     });
 
-    let message = `📊 *${restaurant} Sales Forecast for ${dateStr}*\n\n`;
+    let forecastText = `📊 *${restaurant} Sales Forecast for ${dateStr}*\n\n`;
 
     // Sort products by quantity (highest to lowest)
     const sortedForecast = Object.entries(forecast).sort((a, b) => b[1] - a[1]);
 
     sortedForecast.forEach(([item, qty]) => {
-      message += `• ${item}: ${qty} units\n`;
+      forecastText += `• ${item}: ${qty} units\n`;
     });
 
-    message += `\n*Based on historical sales analysis*`;
+    forecastText += `\n*Based on historical sales analysis*`;
 
-    // Send SMS using Twilio
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
-    console.log("phone== ", phone);
-    console.log("accountSid== ", accountSid);
-    console.log("authToken== ", authToken);
-    console.log("twilioPhoneNumber== ", twilioPhoneNumber);
+    // Send email using Resend
+    const resendApiKey = process.env.RESEND_API_KEY;
 
-    if (accountSid && authToken && twilioPhoneNumber) {
+    if (resendApiKey) {
       try {
-        const client = twilio(accountSid, authToken);
+        const resend = new Resend(resendApiKey);
 
-        // Split message if it exceeds 1600 characters
-        const maxLength = 1600;
-        if (message.length <= maxLength) {
-          await client.messages.create({
-            body: message,
-            from: twilioPhoneNumber,
-            to: phone,
-          });
-        } else {
-          // Split into parts
-          const parts = [];
-          let remainingMessage = message;
-          let partNumber = 1;
-          const totalParts = Math.ceil(message.length / maxLength);
+        await resend.emails.send({
+          from: "dev@xtock.ai", // Replace with your verified domain
+          to: email,
+          subject: `${restaurant} Sales Forecast for ${dateStr}`,
+          text: forecastText,
+          html: forecastText.replace(/\n/g, "<br>"),
+        });
 
-          while (remainingMessage.length > 0) {
-            const chunkSize = Math.min(maxLength - 50, remainingMessage.length); // Leave room for part indicator
-            const chunk = remainingMessage.substring(0, chunkSize);
-            const partMessage = `Part ${partNumber}/${totalParts}:\n${chunk}`;
-            parts.push(partMessage);
-            remainingMessage = remainingMessage.substring(chunkSize);
-            partNumber++;
-          }
-
-          // Send all parts
-          for (const part of parts) {
-            await client.messages.create({
-              body: part,
-              from: twilioPhoneNumber,
-              to: phone,
-            });
-          }
-        }
         return NextResponse.json({
           success: true,
-          message: "Forecast sent via SMS!",
+          message: "Forecast sent via Email!",
           forecast,
         });
-      } catch (smsError) {
-        console.error("Error sending SMS:", smsError);
+      } catch (emailError) {
+        console.error("Error sending email:", emailError);
         return NextResponse.json(
-          { success: false, error: "Failed to send SMS" },
+          { success: false, error: "Failed to send email" },
           { status: 500 }
         );
       }
     } else {
       console.log(
-        `Twilio not configured. Would send SMS to ${phone}:`,
-        message
+        `Resend not configured. Would send email to ${email}:`,
+        forecastText
       );
       return NextResponse.json({
         success: true,
-        message: "Demo mode: Forecast generated (SMS not configured)",
+        message: "Demo mode: Forecast generated (Email not configured)",
         forecast,
       });
     }
   } catch (error) {
-    console.error("Error in demo WhatsApp:", error);
+    console.error("Error in demo email:", error);
     return NextResponse.json(
       { success: false, error: "Invalid request" },
       { status: 400 }
