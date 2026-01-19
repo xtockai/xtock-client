@@ -1,34 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import twilio from "twilio";
-
-// Simple forecasting function
-function predictTomorrowSales(
-  historicalData: { date: string; item: string; quantity: number }[]
-): { [item: string]: number } {
-  // Group by item
-  const itemData: { [item: string]: number[] } = {};
-
-  historicalData.forEach((record) => {
-    if (!itemData[record.item]) {
-      itemData[record.item] = [];
-    }
-    itemData[record.item].push(record.quantity);
-  });
-
-  // For each item, calculate average of last 7 days (or all if less)
-  const predictions: { [item: string]: number } = {};
-
-  Object.keys(itemData).forEach((item) => {
-    const quantities = itemData[item];
-    const last7 = quantities.slice(-7);
-    const avg =
-      last7.length > 0 ? last7.reduce((a, b) => a + b, 0) / last7.length : 0;
-    predictions[item] = Math.round(avg);
-  });
-
-  return predictions;
-}
+import { advancedForecast } from "@/lib/forecasting";
 
 function normalizePhoneNumber(phoneNumber: string | undefined): string | null {
   if (!phoneNumber) return null;
@@ -129,8 +102,8 @@ async function handleDemoApproval(request: NextRequest) {
       });
     }
 
-    // Generate forecast
-    const forecast = predictTomorrowSales(salesData);
+    // Generate forecast using advanced model
+    const forecast = advancedForecast(salesData);
 
     // Format forecast message
     const tomorrow = new Date();
