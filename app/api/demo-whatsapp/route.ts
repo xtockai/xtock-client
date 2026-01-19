@@ -57,37 +57,42 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Send WhatsApp template message using Twilio
+    // Send WhatsApp message using Twilio
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
     const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
-    const contentSid = "HXaa1157fa3e44d99cb3099222475bfadb"; // Template SID
 
     if (accountSid && authToken && twilioPhoneNumber) {
       try {
         const client = twilio(accountSid, authToken);
 
-        // Send template message with buttons
+        // Send conversational message
+        const message = `👋 Hello! Welcome to Xtock Sales Forecast Demo for *${restaurant}*.\n\n` +
+          `📊 We can send you a personalized sales forecast based on your historical data.\n\n` +
+          `Would you like to receive your forecast? Please reply with:\n` +
+          `• *Yes* or *Approve* to receive it\n` +
+          `• *No* or *Deny* to skip it`;
+
         await client.messages.create({
-          contentSid: contentSid,
+          body: message,
           from: `whatsapp:${twilioPhoneNumber}`,
           to: `whatsapp:${phone}`,
         });
 
         return NextResponse.json({
           success: true,
-          message: "WhatsApp template sent! Please approve to receive your forecast.",
+          message: "WhatsApp message sent! Please reply to continue.",
         });
       } catch (whatsappError) {
-        console.error("Error sending WhatsApp template:", whatsappError);
+        console.error("Error sending WhatsApp message:", whatsappError);
         return NextResponse.json(
-          { success: false, error: "Failed to send WhatsApp template" },
+          { success: false, error: "Failed to send WhatsApp message" },
           { status: 500 }
         );
       }
     } else {
       console.log(
-        `Twilio not configured. Would send WhatsApp template to ${phone}`
+        `Twilio not configured. Would send WhatsApp message to ${phone}`
       );
       return NextResponse.json({
         success: true,
