@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
     const authToken = process.env.TWILIO_AUTH_TOKEN;
     const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
     // New Quick Reply template with buttons: "Yes" (ID: demo-accept) and "Cancel" (ID: demo-cancel)
-    const contentSid = "HX8ec9a85a0f178f605264810fe19d9101"; // TODO: Replace with new Quick Reply template SID
+    const contentSid = "HX7939e5aeac921c8d44faf8060c0b8188"; // TODO: Replace with new Quick Reply template SID
 
     if (accountSid && authToken && twilioPhoneNumber) {
       try {
