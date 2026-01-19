@@ -184,18 +184,19 @@ export async function POST(request: NextRequest) {
 
     console.log("WhatsApp webhook received:", body);
 
-    // Extract phone number and message
+    // Extract phone number, message, and button payload (for Quick Reply buttons)
     const phoneNumber = normalizePhoneNumber(
       body.From?.toString() || body.WaId?.toString()
     );
     const messageBody = body.Body?.toString() || "";
+    const buttonPayload = body.ButtonPayload?.toString() || ""; // Quick Reply button ID
 
     if (!phoneNumber) {
       console.error("No phone number found in webhook");
       return NextResponse.json({ error: "No phone number" }, { status: 400 });
     }
 
-    console.log(`Message from ${phoneNumber}: "${messageBody}"`);
+    console.log(`Message from ${phoneNumber}: "${messageBody}"${buttonPayload ? ` | Button: ${buttonPayload}` : ""}`);
 
     // Check if there's a pending demo request for this phone number
     const { data: demoRequests, error: requestError } = await supabase
@@ -215,19 +216,30 @@ export async function POST(request: NextRequest) {
     if (demoRequests && demoRequests.length > 0) {
       const demoRequest = demoRequests[0];
 
-      if (isApprovalMessage(messageBody)) {
-        console.log("Detected approval response");
+      // Check Quick Reply button press first (priority)
+      if (buttonPayload === "demo-accept") {
+        console.log("Quick Reply button: demo-accept");
         await handleApproval(phoneNumber, demoRequest);
-        return NextResponse.json({ status: "approved", processed: true });
-      } else if (isDenialMessage(messageBody)) {
-        console.log("Detected denial response");
+        return NextResponse.json({ status: "approved", processed: true, source: "quick_reply" });
+      } else if (buttonPayload === "demo-cancel") {
+        console.log("Quick Reply button: demo-cancel");
         await handleDenial(phoneNumber, demoRequest);
-        return NextResponse.json({ status: "denied", processed: true });
+        return NextResponse.json({ status: "denied", processed: true, source: "quick_reply" });
+      }
+      // If no button pressed, check text message
+      else if (isApprovalMessage(messageBody)) {
+        console.log("Detected approval response from text");
+        await handleApproval(phoneNumber, demoRequest);
+        return NextResponse.json({ status: "approved", processed: true, source: "text" });
+      } else if (isDenialMessage(messageBody)) {
+        console.log("Detected denial response from text");
+        await handleDenial(phoneNumber, demoRequest);
+        return NextResponse.json({ status: "denied", processed: true, source: "text" });
       } else {
         // User sent a message but it's not a clear yes/no
         await sendWhatsAppMessage(
           phoneNumber,
-          `I didn't understand your response. Please reply with "yes" to receive the forecast or "no" to cancel.`
+          `I didn't understand your response. Please click one of the buttons or reply with "yes" to receive the forecast or "no" to cancel.`
         );
         return NextResponse.json({ status: "waiting_for_clear_response" });
       }

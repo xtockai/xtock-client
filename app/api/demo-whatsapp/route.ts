@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
     if (!restaurant || !phone) {
       return NextResponse.json(
         { success: false, error: "Missing restaurant or phone" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
       console.error("Error fetching sales demo data:", error);
       return NextResponse.json(
         { success: false, error: "Database error" },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -53,46 +53,44 @@ export async function POST(req: NextRequest) {
       console.error("Error creating WhatsApp request:", insertError);
       return NextResponse.json(
         { success: false, error: "Failed to create request" },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
-    // Send WhatsApp message using Twilio
+    // Send WhatsApp template message using Twilio
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
     const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
+    // New Quick Reply template with buttons: "Yes" (ID: demo-accept) and "Cancel" (ID: demo-cancel)
+    const contentSid = "HXb44a0f4663cc352450ffec87161f7e3e"; // TODO: Replace with new Quick Reply template SID
 
     if (accountSid && authToken && twilioPhoneNumber) {
       try {
         const client = twilio(accountSid, authToken);
 
-        // Send conversational message
-        const message = `👋 Hello! Welcome to Xtock Sales Forecast Demo for *${restaurant}*.\n\n` +
-          `📊 We can send you a personalized sales forecast based on your historical data.\n\n` +
-          `Would you like to receive your forecast? Please reply with:\n` +
-          `• *Yes* or *Approve* to receive it\n` +
-          `• *No* or *Deny* to skip it`;
-
+        // Send template message with buttons (required by WhatsApp policy)
+        // Note: Users can also reply with text (yes/no) which will be handled by the webhook
         await client.messages.create({
-          body: message,
+          contentSid: contentSid,
           from: `whatsapp:${twilioPhoneNumber}`,
           to: `whatsapp:${phone}`,
         });
 
         return NextResponse.json({
           success: true,
-          message: "WhatsApp message sent! Please reply to continue.",
+          message:
+            "WhatsApp template sent! User can click buttons or reply with text (yes/no).",
         });
       } catch (whatsappError) {
-        console.error("Error sending WhatsApp message:", whatsappError);
+        console.error("Error sending WhatsApp template:", whatsappError);
         return NextResponse.json(
-          { success: false, error: "Failed to send WhatsApp message" },
-          { status: 500 }
+          { success: false, error: "Failed to send WhatsApp template" },
+          { status: 500 },
         );
       }
     } else {
       console.log(
-        `Twilio not configured. Would send WhatsApp message to ${phone}`
+        `Twilio not configured. Would send WhatsApp template to ${phone}`,
       );
       return NextResponse.json({
         success: true,
@@ -103,7 +101,7 @@ export async function POST(req: NextRequest) {
     console.error("Error in demo WhatsApp:", error);
     return NextResponse.json(
       { success: false, error: "Invalid request" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 }
