@@ -2,34 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import twilio from "twilio";
 
-// Simple forecasting function
-function predictTomorrowSales(
-  historicalData: { date: string; item: string; quantity: number }[]
-): { [item: string]: number } {
-  // Group by item
-  const itemData: { [item: string]: number[] } = {};
-
-  historicalData.forEach((record) => {
-    if (!itemData[record.item]) {
-      itemData[record.item] = [];
-    }
-    itemData[record.item].push(record.quantity);
-  });
-
-  // For each item, calculate average of last 7 days (or all if less)
-  const predictions: { [item: string]: number } = {};
-
-  Object.keys(itemData).forEach((item) => {
-    const quantities = itemData[item];
-    const last7 = quantities.slice(-7);
-    const avg =
-      last7.length > 0 ? last7.reduce((a, b) => a + b, 0) / last7.length : 0;
-    predictions[item] = Math.round(avg);
-  });
-
-  return predictions;
-}
-
 // POST /api/demo-whatsapp
 export async function POST(req: NextRequest) {
   try {
@@ -42,7 +14,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Query sales_demo for this restaurant
+    // Verify that there is data for this restaurant
     const { data: salesData, error } = await supabase
       .from("sales_demo")
       .select("date, item, quantity")
@@ -65,97 +37,61 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Generate forecast
-    const forecast = predictTomorrowSales(salesData);
+    // Create a pending request in the database
+    const { data: requestData, error: insertError } = await supabase
+      .from("demo_whatsapp_request")
+      .insert([
+        {
+          phone,
+          restaurant,
+          status: "pending",
+        },
+      ])
+      .select();
 
-    // Format forecast message
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const dateStr = tomorrow.toLocaleDateString("en-US", {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    });
+    if (insertError) {
+      console.error("Error creating WhatsApp request:", insertError);
+      return NextResponse.json(
+        { success: false, error: "Failed to create request" },
+        { status: 500 }
+      );
+    }
 
-    let message = `📊 *${restaurant} Sales Forecast for ${dateStr}*\n\n`;
-
-    // Sort products by quantity (highest to lowest)
-    const sortedForecast = Object.entries(forecast).sort((a, b) => b[1] - a[1]);
-
-    sortedForecast.forEach(([item, qty]) => {
-      message += `• ${item}: ${qty} units\n`;
-    });
-
-    message += `\n*Based on historical sales analysis*`;
-
-    // Send SMS using Twilio
+    // Send WhatsApp template message using Twilio
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
     const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
-    console.log("phone== ", phone);
-    console.log("accountSid== ", accountSid);
-    console.log("authToken== ", authToken);
-    console.log("twilioPhoneNumber== ", twilioPhoneNumber);
+    const contentSid = "HXaa1157fa3e44d99cb3099222475bfadb"; // Template SID
 
     if (accountSid && authToken && twilioPhoneNumber) {
       try {
         const client = twilio(accountSid, authToken);
 
-        // Split message if it exceeds 1600 characters
-        const maxLength = 1600;
-        if (message.length <= maxLength) {
-          await client.messages.create({
-            body: message,
-            from: twilioPhoneNumber,
-            to: phone,
-          });
-        } else {
-          // Split into parts
-          const parts = [];
-          let remainingMessage = message;
-          let partNumber = 1;
-          const totalParts = Math.ceil(message.length / maxLength);
+        // Send template message with buttons
+        await client.messages.create({
+          contentSid: contentSid,
+          from: `whatsapp:${twilioPhoneNumber}`,
+          to: `whatsapp:${phone}`,
+        });
 
-          while (remainingMessage.length > 0) {
-            const chunkSize = Math.min(maxLength - 50, remainingMessage.length); // Leave room for part indicator
-            const chunk = remainingMessage.substring(0, chunkSize);
-            const partMessage = `Part ${partNumber}/${totalParts}:\n${chunk}`;
-            parts.push(partMessage);
-            remainingMessage = remainingMessage.substring(chunkSize);
-            partNumber++;
-          }
-
-          // Send all parts
-          for (const part of parts) {
-            await client.messages.create({
-              body: part,
-              from: twilioPhoneNumber,
-              to: phone,
-            });
-          }
-        }
         return NextResponse.json({
           success: true,
-          message: "Forecast sent via SMS!",
-          forecast,
+          message: "WhatsApp template sent! Please approve to receive your forecast.",
         });
-      } catch (smsError) {
-        console.error("Error sending SMS:", smsError);
+      } catch (whatsappError) {
+        console.error("Error sending WhatsApp template:", whatsappError);
         return NextResponse.json(
-          { success: false, error: "Failed to send SMS" },
+          { success: false, error: "Failed to send WhatsApp template" },
           { status: 500 }
         );
       }
     } else {
       console.log(
-        `Twilio not configured. Would send SMS to ${phone}:`,
-        message
+        `Twilio not configured. Would send WhatsApp template to ${phone}`
       );
       return NextResponse.json({
         success: true,
-        message: "Demo mode: Forecast generated (SMS not configured)",
-        forecast,
+        message: "Demo mode: Request created (WhatsApp not configured)",
       });
     }
   } catch (error) {

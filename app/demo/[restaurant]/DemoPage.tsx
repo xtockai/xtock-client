@@ -43,7 +43,7 @@ interface DemoPageProps {
 }
 
 const DemoPage: React.FC<DemoPageProps> = ({ restaurant }) => {
-  const [activeTab, setActiveTab] = useState<'sms' | 'email'>('sms');
+  const [activeTab, setActiveTab] = useState<'whatsapp' | 'email'>('whatsapp');
   const [countryCode, setCountryCode] = useState("+1");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
@@ -110,14 +110,14 @@ const DemoPage: React.FC<DemoPageProps> = ({ restaurant }) => {
       <div className="flex w-full max-w-md mb-4">
         <button
           type="button"
-          onClick={() => setActiveTab('sms')}
+          onClick={() => setActiveTab('whatsapp')}
           className={`flex-1 py-2 px-4 text-center font-medium rounded-l-lg border transition ${
-            activeTab === 'sms'
+            activeTab === 'whatsapp'
               ? 'bg-indigo-600 text-white border-indigo-600'
               : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
           }`}
         >
-          📱 SMS
+          📱 WhatsApp
         </button>
         <button
           type="button"
@@ -136,7 +136,7 @@ const DemoPage: React.FC<DemoPageProps> = ({ restaurant }) => {
         className="flex flex-col items-center gap-4 w-full max-w-md bg-white p-6 rounded-lg shadow-lg"
         onSubmit={handleSubmit}
       >
-        {activeTab === 'sms' ? (
+        {activeTab === 'whatsapp' ? (
           <div className="flex w-full gap-2 items-center">
             <select
               className="border rounded-l-md px-3 py-2 bg-gray-50 text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
@@ -176,9 +176,9 @@ const DemoPage: React.FC<DemoPageProps> = ({ restaurant }) => {
         <button
           type="submit"
           className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 rounded transition disabled:opacity-60"
-          disabled={loading || (activeTab === 'sms' ? !phone : !email)}
+          disabled={loading || (activeTab === 'whatsapp' ? !phone : !email)}
         >
-          {loading ? "Sending..." : `Send Forecast via ${activeTab === 'sms' ? 'SMS' : 'Email'}`}
+          {loading ? "Sending..." : `Send Forecast via ${activeTab === 'whatsapp' ? 'WhatsApp' : 'Email'}`}
         </button>
         {success && (
           <div className="text-green-600 font-medium">
