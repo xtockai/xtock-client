@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import twilio from "twilio";
-import { advancedForecast } from "@/lib/forecasting";
+import { xgboostForecast } from "@/lib/forecasting";
 
 function normalizePhoneNumber(phoneNumber: string | undefined): string | null {
   if (!phoneNumber) return null;
 
   // Remove whatsapp: prefix if present
-  let cleaned = phoneNumber.replace("whatsapp:", "");
+  let cleaned = phoneNumber.replace("whatsapp:", "").trim();
+
+  // Remove any spaces, dashes, or parentheses
+  cleaned = cleaned.replace(/[\s\-\(\)]/g, "");
 
   // Add + if missing
   if (!cleaned.startsWith("+")) {
@@ -15,6 +18,27 @@ function normalizePhoneNumber(phoneNumber: string | undefined): string | null {
   }
 
   return cleaned;
+}
+
+// Helper function to get all possible phone number variations
+function getPhoneVariations(phone: string): string[] {
+  const variations = [phone];
+
+  // Remove + and add it back
+  const withoutPlus = phone.replace("+", "");
+  variations.push(withoutPlus);
+  variations.push(`+${withoutPlus}`);
+
+  // For Mexican numbers, handle the "1" that might be added/removed
+  if (phone.startsWith("+52") || phone.startsWith("52")) {
+    const baseNumber = withoutPlus.replace(/^52/, "");
+    variations.push(`+521${baseNumber}`); // With 1
+    variations.push(`521${baseNumber}`);  // Without +, with 1
+    variations.push(`+52${baseNumber}`);  // Without 1
+    variations.push(`52${baseNumber}`);   // Without + and 1
+  }
+
+  return [...new Set(variations)]; // Remove duplicates
 }
 
 export async function GET(request: NextRequest) {
@@ -50,11 +74,15 @@ async function handleDemoApproval(request: NextRequest) {
 
     console.log(`Looking up demo request for phone: ${phoneNumber}`);
 
-    // Find pending demo request for this phone number
+    // Get all possible variations of the phone number
+    const phoneVariations = getPhoneVariations(phoneNumber);
+    console.log(`Trying phone variations:`, phoneVariations);
+
+    // Find pending demo request for this phone number (try all variations)
     const { data: demoRequests, error: requestError } = await supabase
       .from("demo_whatsapp_request")
       .select("*")
-      .eq("phone", phoneNumber)
+      .in("phone", phoneVariations)
       .eq("status", "pending")
       .order("created_at", { ascending: false })
       .limit(1);
@@ -65,7 +93,10 @@ async function handleDemoApproval(request: NextRequest) {
     }
 
     if (!demoRequests || demoRequests.length === 0) {
-      console.error(`No pending demo request found for phone: ${phoneNumber}`);
+      console.error(
+        `No pending demo request found for phone variations:`,
+        phoneVariations
+      );
       return NextResponse.json(
         {
           error:
@@ -102,8 +133,8 @@ async function handleDemoApproval(request: NextRequest) {
       });
     }
 
-    // Generate forecast using advanced model
-    const forecast = advancedForecast(salesData);
+    // Generate forecast using XGBoost (with fallback to advanced model)
+    const forecast = await xgboostForecast(salesData);
 
     // Format forecast message
     const tomorrow = new Date();

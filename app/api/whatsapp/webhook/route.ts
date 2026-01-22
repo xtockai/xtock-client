@@ -4,7 +4,7 @@ import twilio from "twilio";
 
 // Simple forecasting function
 function predictTomorrowSales(
-  historicalData: { date: string; item: string; quantity: number }[]
+  historicalData: { date: string; item: string; quantity: number }[],
 ): { [item: string]: number } {
   const itemData: { [item: string]: number[] } = {};
 
@@ -45,15 +45,37 @@ function normalizePhoneNumber(phoneNumber: string | undefined): string | null {
 // Detect if message is an approval response
 function isApprovalMessage(message: string): boolean {
   const normalized = message.toLowerCase().trim();
-  const approvalKeywords = ["yes", "si", "sí", "approve", "aprobar", "ok", "okay", "accept", "aceptar"];
-  return approvalKeywords.some(keyword => normalized === keyword || normalized.includes(keyword));
+  const approvalKeywords = [
+    "yes",
+    "si",
+    "sí",
+    "approve",
+    "aprobar",
+    "ok",
+    "okay",
+    "accept",
+    "aceptar",
+  ];
+  return approvalKeywords.some(
+    (keyword) => normalized === keyword || normalized.includes(keyword),
+  );
 }
 
 // Detect if message is a denial response
 function isDenialMessage(message: string): boolean {
   const normalized = message.toLowerCase().trim();
-  const denialKeywords = ["no", "deny", "denegar", "cancel", "cancelar", "reject", "rechazar"];
-  return denialKeywords.some(keyword => normalized === keyword || normalized.includes(keyword));
+  const denialKeywords = [
+    "no",
+    "deny",
+    "denegar",
+    "cancel",
+    "cancelar",
+    "reject",
+    "rechazar",
+  ];
+  return denialKeywords.some(
+    (keyword) => normalized === keyword || normalized.includes(keyword),
+  );
 }
 
 async function sendWhatsAppMessage(phoneNumber: string, message: string) {
@@ -117,7 +139,7 @@ async function handleApproval(phoneNumber: string, demoRequest: any) {
     console.error("Error fetching sales demo data:", salesError);
     await sendWhatsAppMessage(
       phoneNumber,
-      "Sorry, there was an error generating your forecast. Please try again later."
+      "Sorry, there was an error generating your forecast. Please try again later.",
     );
     return;
   }
@@ -170,10 +192,12 @@ async function handleDenial(phoneNumber: string, demoRequest: any) {
   // Send confirmation message
   await sendWhatsAppMessage(
     phoneNumber,
-    "Thanks for your response. You won't receive the forecast. If you change your mind, feel free to request a new demo!"
+    "Thanks for your response. You won't receive the forecast. If you change your mind, feel free to request a new demo!",
   );
 
-  console.log(`Demo request denied for ${demoRequest.restaurant} from ${phoneNumber}`);
+  console.log(
+    `Demo request denied for ${demoRequest.restaurant} from ${phoneNumber}`,
+  );
 }
 
 // POST endpoint - receives WhatsApp messages from Twilio
@@ -186,7 +210,7 @@ export async function POST(request: NextRequest) {
 
     // Extract phone number, message, and button payload (for Quick Reply buttons)
     const phoneNumber = normalizePhoneNumber(
-      body.From?.toString() || body.WaId?.toString()
+      body.From?.toString() || body.WaId?.toString(),
     );
     const messageBody = body.Body?.toString() || "";
     const buttonPayload = body.ButtonPayload?.toString() || ""; // Quick Reply button ID
@@ -196,7 +220,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No phone number" }, { status: 400 });
     }
 
-    console.log(`Message from ${phoneNumber}: "${messageBody}"${buttonPayload ? ` | Button: ${buttonPayload}` : ""}`);
+    console.log(
+      `Message from ${phoneNumber}: "${messageBody}"${buttonPayload ? ` | Button: ${buttonPayload}` : ""}`,
+    );
 
     // Check if there's a pending demo request for this phone number
     const { data: demoRequests, error: requestError } = await supabase
@@ -216,30 +242,64 @@ export async function POST(request: NextRequest) {
     if (demoRequests && demoRequests.length > 0) {
       const demoRequest = demoRequests[0];
 
+      if (buttonPayload === "forecast-accept") {
+        console.log("Quick Reply button: forecast-accept");
+        await handleApproval(phoneNumber, demoRequest);
+        return NextResponse.json({
+          status: "approved",
+          processed: true,
+          source: "quick_reply",
+        });
+      } else if (buttonPayload === "forecast-cancel") {
+        console.log("Quick Reply button: forecast-cancel");
+        await handleDenial(phoneNumber, demoRequest);
+        return NextResponse.json({
+          status: "denied",
+          processed: true,
+          source: "quick_reply",
+        });
+      }
+
       // Check Quick Reply button press first (priority)
       if (buttonPayload === "demo-accept") {
         console.log("Quick Reply button: demo-accept");
         await handleApproval(phoneNumber, demoRequest);
-        return NextResponse.json({ status: "approved", processed: true, source: "quick_reply" });
+        return NextResponse.json({
+          status: "approved",
+          processed: true,
+          source: "quick_reply",
+        });
       } else if (buttonPayload === "demo-cancel") {
         console.log("Quick Reply button: demo-cancel");
         await handleDenial(phoneNumber, demoRequest);
-        return NextResponse.json({ status: "denied", processed: true, source: "quick_reply" });
+        return NextResponse.json({
+          status: "denied",
+          processed: true,
+          source: "quick_reply",
+        });
       }
       // If no button pressed, check text message
       else if (isApprovalMessage(messageBody)) {
         console.log("Detected approval response from text");
         await handleApproval(phoneNumber, demoRequest);
-        return NextResponse.json({ status: "approved", processed: true, source: "text" });
+        return NextResponse.json({
+          status: "approved",
+          processed: true,
+          source: "text",
+        });
       } else if (isDenialMessage(messageBody)) {
         console.log("Detected denial response from text");
         await handleDenial(phoneNumber, demoRequest);
-        return NextResponse.json({ status: "denied", processed: true, source: "text" });
+        return NextResponse.json({
+          status: "denied",
+          processed: true,
+          source: "text",
+        });
       } else {
         // User sent a message but it's not a clear yes/no
         await sendWhatsAppMessage(
           phoneNumber,
-          `I didn't understand your response. Please click one of the buttons or reply with "yes" to receive the forecast or "no" to cancel.`
+          `I didn't understand your response. Please click one of the buttons or reply with "yes" to receive the forecast or "no" to cancel.`,
         );
         return NextResponse.json({ status: "waiting_for_clear_response" });
       }
@@ -248,12 +308,11 @@ export async function POST(request: NextRequest) {
     // No pending demo request - could handle other conversational flows here
     console.log("No pending demo request for this number");
     return NextResponse.json({ status: "no_pending_request" });
-
   } catch (error) {
     console.error("Error processing WhatsApp webhook:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
