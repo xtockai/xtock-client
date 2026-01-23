@@ -242,24 +242,6 @@ export async function POST(request: NextRequest) {
     if (demoRequests && demoRequests.length > 0) {
       const demoRequest = demoRequests[0];
 
-      if (buttonPayload === "forecast-accept") {
-        console.log("Quick Reply button: forecast-accept");
-        await handleApproval(phoneNumber, demoRequest);
-        return NextResponse.json({
-          status: "approved",
-          processed: true,
-          source: "quick_reply",
-        });
-      } else if (buttonPayload === "forecast-cancel") {
-        console.log("Quick Reply button: forecast-cancel");
-        await handleDenial(phoneNumber, demoRequest);
-        return NextResponse.json({
-          status: "denied",
-          processed: true,
-          source: "quick_reply",
-        });
-      }
-
       // Check Quick Reply button press first (priority)
       if (buttonPayload === "demo-accept") {
         console.log("Quick Reply button: demo-accept");

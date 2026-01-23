@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import twilio from "twilio";
-import { xgboostForecast } from "@/lib/forecasting";
+import { advancedForecast } from "@/lib/forecasting";
 
 function normalizePhoneNumber(phoneNumber: string | undefined): string | null {
   if (!phoneNumber) return null;
@@ -133,8 +133,8 @@ async function handleDemoApproval(request: NextRequest) {
       });
     }
 
-    // Generate forecast using XGBoost (with fallback to advanced model)
-    const forecast = await xgboostForecast(salesData);
+    // Generate forecast using advanced model
+    const forecast = advancedForecast(salesData);
 
     // Format forecast message
     const tomorrow = new Date();
