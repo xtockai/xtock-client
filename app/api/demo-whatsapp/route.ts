@@ -2,6 +2,36 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import twilio from "twilio";
 
+// Normalize phone number to standard format
+// For Mexican numbers, always store WITHOUT the "1" after country code
+// This ensures consistency with Twilio's WhatsApp webhook responses
+function normalizePhoneForStorage(phone: string): string {
+  let normalized = phone.trim();
+
+  // Remove whatsapp: prefix if present
+  normalized = normalized.replace("whatsapp:", "");
+
+  // Remove spaces, dashes, parentheses
+  normalized = normalized.replace(/[\s\-\(\)]/g, "");
+
+  // Add + if missing
+  if (!normalized.startsWith("+")) {
+    normalized = `+${normalized}`;
+  }
+
+  // For Mexican numbers: normalize to +52 + 10 digits (remove "1" if present)
+  if (normalized.startsWith("+52")) {
+    const afterCountryCode = normalized.substring(3); // Everything after "+52"
+
+    // If it has 11 digits and starts with "1", remove the "1"
+    if (afterCountryCode.startsWith("1") && afterCountryCode.length === 11) {
+      normalized = `+52${afterCountryCode.substring(1)}`;
+    }
+  }
+
+  return normalized;
+}
+
 // POST /api/demo-whatsapp
 export async function POST(req: NextRequest) {
   try {
@@ -13,6 +43,10 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
+
+    // Normalize phone number to standard format (for Mexican numbers, removes "1" after country code)
+    const normalizedPhone = normalizePhoneForStorage(phone);
+    console.log(`Original phone: ${phone}, Normalized: ${normalizedPhone}`);
 
     // Verify that there is data for this restaurant
     const { data: salesData, error } = await supabase
@@ -42,7 +76,7 @@ export async function POST(req: NextRequest) {
       .from("demo_whatsapp_request")
       .insert([
         {
-          phone,
+          phone: normalizedPhone, // Use normalized phone for consistency
           restaurant,
           status: "pending",
         },
@@ -70,6 +104,7 @@ export async function POST(req: NextRequest) {
 
         // Send template message with buttons (required by WhatsApp policy)
         // Note: Users can also reply with text (yes/no) which will be handled by the webhook
+        // Use the original phone (Twilio will normalize it themselves)
         await client.messages.create({
           contentSid: contentSid,
           from: `whatsapp:${twilioPhoneNumber}`,

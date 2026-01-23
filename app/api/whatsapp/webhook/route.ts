@@ -56,11 +56,19 @@ function getPhoneVariations(phone: string): string[] {
 
   // For Mexican numbers, handle the "1" that might be added/removed
   if (phone.startsWith("+52") || phone.startsWith("52")) {
-    const baseNumber = withoutPlus.replace(/^52/, "");
-    variations.push(`+521${baseNumber}`); // With 1
-    variations.push(`521${baseNumber}`);  // Without +, with 1
-    variations.push(`+52${baseNumber}`);  // Without 1
-    variations.push(`52${baseNumber}`);   // Without + and 1
+    const afterCountryCode = withoutPlus.replace(/^52/, ""); // Everything after "52"
+
+    // Check if number has "1" after country code (mobile format)
+    if (afterCountryCode.startsWith("1") && afterCountryCode.length === 11) {
+      // Has "1" - generate version WITHOUT "1"
+      const withoutOne = afterCountryCode.substring(1); // Remove the "1"
+      variations.push(`+52${withoutOne}`);
+      variations.push(`52${withoutOne}`);
+    } else if (afterCountryCode.length === 10) {
+      // Doesn't have "1" - generate version WITH "1"
+      variations.push(`+521${afterCountryCode}`);
+      variations.push(`521${afterCountryCode}`);
+    }
   }
 
   return [...new Set(variations)]; // Remove duplicates
@@ -264,6 +272,11 @@ export async function POST(request: NextRequest) {
     if (requestError) {
       console.error("Error fetching demo request:", requestError);
       return NextResponse.json({ error: "Database error" }, { status: 500 });
+    }
+
+    console.log(`Found ${demoRequests?.length || 0} pending demo requests`);
+    if (demoRequests && demoRequests.length > 0) {
+      console.log(`Match found! DB phone: ${demoRequests[0].phone}, Webhook phone: ${phoneNumber}`);
     }
 
     // If there's a pending request, check if message is a response
