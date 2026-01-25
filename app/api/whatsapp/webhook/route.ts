@@ -232,6 +232,217 @@ async function handleDenial(phoneNumber: string, demoRequest: any) {
   );
 }
 
+// Handle real forecast approval
+async function handleForecastApproval(
+  phoneNumber: string,
+  phoneVariations: string[],
+) {
+  console.log(`Processing forecast approval for phone: ${phoneNumber}`);
+
+  // Find collaborator by phone number variations
+  const { data: collaborators, error: collabError } = await supabase
+    .from("collaborators")
+    .select("id, location_id, contact_type, contact_value")
+    .eq("contact_type", "phone")
+    .in("contact_value", phoneVariations);
+
+  if (collabError) {
+    console.error("Error fetching collaborators:", collabError);
+    await sendWhatsAppMessage(
+      phoneNumber,
+      "Sorry, there was an error processing your request. Please try again later.",
+    );
+    return;
+  }
+
+  if (!collaborators || collaborators.length === 0) {
+    console.error(`No collaborator found with phone variations:`, phoneVariations);
+    await sendWhatsAppMessage(
+      phoneNumber,
+      "Sorry, we couldn't find your information. Please contact support.",
+    );
+    return;
+  }
+
+  // Use the first matching collaborator
+  const matchingCollaborator = collaborators[0];
+  const locationId = matchingCollaborator.location_id;
+  console.log(`Found collaborator for location: ${locationId}`);
+
+  // Get location info
+  const { data: location, error: locationError } = await supabase
+    .from("locations")
+    .select("id, name, organization_id")
+    .eq("id", locationId)
+    .single();
+
+  if (locationError || !location) {
+    console.error(`Location ${locationId} not found:`, locationError);
+    await sendWhatsAppMessage(
+      phoneNumber,
+      "Sorry, there was an error retrieving location information.",
+    );
+    return;
+  }
+
+  // Use tomorrow's date as forecast date
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const forecastDate = tomorrow.toISOString().split("T")[0];
+
+  // Get forecasts for this location and date
+  const { data: forecasts, error: forecastError } = await supabase
+    .from("forecasts")
+    .select("*")
+    .eq("location_id", locationId)
+    .eq("forecast_date", forecastDate);
+
+  if (forecastError) {
+    console.error("Error fetching forecasts:", forecastError);
+    await sendWhatsAppMessage(
+      phoneNumber,
+      "Sorry, there was an error retrieving the forecast.",
+    );
+    return;
+  }
+
+  if (!forecasts || forecasts.length === 0) {
+    console.warn(
+      `No forecasts found for location ${locationId} on ${forecastDate}`,
+    );
+    await sendWhatsAppMessage(
+      phoneNumber,
+      "No forecast available for tomorrow. Please check back later.",
+    );
+    return;
+  }
+
+  // Format forecast message with tomorrow's date
+  const dateStr = tomorrow.toLocaleDateString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+
+  let message = `📊 *${location.name} Forecast for ${dateStr}*\n\n`;
+
+  // Sort products by quantity (highest to lowest)
+  const sortedForecasts = forecasts.sort(
+    (a: any, b: any) => b.quantity - a.quantity,
+  );
+
+  sortedForecasts.forEach((forecast: any) => {
+    message += `• ${forecast.product_name}: ${forecast.quantity} ${forecast.unit || "units"}\n`;
+  });
+
+  message += `\n*AI-powered forecast based on historical data*`;
+
+  // Send forecast
+  await sendWhatsAppMessage(phoneNumber, message);
+
+  // Record the acceptance
+  const { error: responseError } = await supabase
+    .from("forecast_responses")
+    .insert({
+      location_id: locationId,
+      organization_id: location.organization_id,
+      forecast_date: forecastDate,
+      response_type: "accept",
+      phone_number: phoneNumber,
+      collaborator_id: matchingCollaborator.id,
+    });
+
+  if (responseError) {
+    console.error("Error recording response:", responseError);
+  }
+
+  console.log(`Forecast sent successfully to ${phoneNumber} for ${location.name}`);
+}
+
+// Handle real forecast denial
+async function handleForecastDenial(
+  phoneNumber: string,
+  phoneVariations: string[],
+) {
+  console.log(`Processing forecast denial for phone: ${phoneNumber}`);
+
+  // Find collaborator by phone number variations
+  const { data: collaborators, error: collabError } = await supabase
+    .from("collaborators")
+    .select("id, location_id, contact_type, contact_value")
+    .eq("contact_type", "phone")
+    .in("contact_value", phoneVariations);
+
+  if (collabError) {
+    console.error("Error fetching collaborators:", collabError);
+    await sendWhatsAppMessage(
+      phoneNumber,
+      "Sorry, there was an error processing your response.",
+    );
+    return;
+  }
+
+  if (!collaborators || collaborators.length === 0) {
+    console.error(`No collaborator found with phone variations:`, phoneVariations);
+    await sendWhatsAppMessage(
+      phoneNumber,
+      "Thanks for your response.",
+    );
+    return;
+  }
+
+  const matchingCollaborator = collaborators[0];
+  const locationId = matchingCollaborator.location_id;
+
+  // Get location info
+  const { data: location, error: locationError } = await supabase
+    .from("locations")
+    .select("id, name, organization_id")
+    .eq("id", locationId)
+    .single();
+
+  if (locationError || !location) {
+    console.error(`Location ${locationId} not found:`, locationError);
+    await sendWhatsAppMessage(
+      phoneNumber,
+      "Thanks for your response.",
+    );
+    return;
+  }
+
+  // Use tomorrow's date as forecast date
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const forecastDate = tomorrow.toISOString().split("T")[0];
+
+  // Record the denial
+  const { error: responseError } = await supabase
+    .from("forecast_responses")
+    .insert({
+      location_id: locationId,
+      organization_id: location.organization_id,
+      forecast_date: forecastDate,
+      response_type: "deny",
+      phone_number: phoneNumber,
+      collaborator_id: matchingCollaborator.id,
+    });
+
+  if (responseError) {
+    console.error("Error recording response:", responseError);
+  }
+
+  // Send confirmation message
+  await sendWhatsAppMessage(
+    phoneNumber,
+    "Thanks for your response. You won't receive tomorrow's forecast.",
+  );
+
+  console.log(
+    `Forecast denial recorded for ${location.name} from ${phoneNumber}`,
+  );
+}
+
 // POST endpoint - receives WhatsApp messages from Twilio
 export async function POST(request: NextRequest) {
   try {
@@ -260,74 +471,103 @@ export async function POST(request: NextRequest) {
     const phoneVariations = getPhoneVariations(phoneNumber);
     console.log(`Trying phone variations:`, phoneVariations);
 
-    // Check if there's a pending demo request for this phone number (try all variations)
-    const { data: demoRequests, error: requestError } = await supabase
-      .from("demo_whatsapp_request")
-      .select("*")
-      .in("phone", phoneVariations)
-      .eq("status", "pending")
-      .order("created_at", { ascending: false })
-      .limit(1);
+    // REAL FORECAST FLOW
+    if (buttonPayload === "forecast-accept" || buttonPayload === "forecast-cancel") {
+      console.log("Processing Real Forecast Quick Reply button");
 
-    if (requestError) {
-      console.error("Error fetching demo request:", requestError);
-      return NextResponse.json({ error: "Database error" }, { status: 500 });
-    }
-
-    console.log(`Found ${demoRequests?.length || 0} pending demo requests`);
-    if (demoRequests && demoRequests.length > 0) {
-      console.log(`Match found! DB phone: ${demoRequests[0].phone}, Webhook phone: ${phoneNumber}`);
-    }
-
-    // If there's a pending request, check if message is a response
-    if (demoRequests && demoRequests.length > 0) {
-      const demoRequest = demoRequests[0];
-
-      // Check Quick Reply button press first (priority)
-      if (buttonPayload === "demo-accept") {
-        console.log("Quick Reply button: demo-accept");
-        await handleApproval(phoneNumber, demoRequest);
+      if (buttonPayload === "forecast-accept") {
+        console.log("Quick Reply button: forecast-accept");
+        await handleForecastApproval(phoneNumber, phoneVariations);
         return NextResponse.json({
-          status: "approved",
+          status: "forecast_approved",
           processed: true,
           source: "quick_reply",
         });
-      } else if (buttonPayload === "demo-cancel") {
-        console.log("Quick Reply button: demo-cancel");
-        await handleDenial(phoneNumber, demoRequest);
+      } else if (buttonPayload === "forecast-cancel") {
+        console.log("Quick Reply button: forecast-cancel");
+        await handleForecastDenial(phoneNumber, phoneVariations);
         return NextResponse.json({
-          status: "denied",
+          status: "forecast_denied",
           processed: true,
           source: "quick_reply",
         });
       }
-      // If no button pressed, check text message
-      else if (isApprovalMessage(messageBody)) {
-        console.log("Detected approval response from text");
-        await handleApproval(phoneNumber, demoRequest);
-        return NextResponse.json({
-          status: "approved",
-          processed: true,
-          source: "text",
-        });
-      } else if (isDenialMessage(messageBody)) {
-        console.log("Detected denial response from text");
-        await handleDenial(phoneNumber, demoRequest);
-        return NextResponse.json({
-          status: "denied",
-          processed: true,
-          source: "text",
-        });
-      } else {
-        // User sent a message but it's not a clear yes/no
-        await sendWhatsAppMessage(
-          phoneNumber,
-          `I didn't understand your response. Please click one of the buttons or reply with "yes" to receive the forecast or "no" to cancel.`,
+    }
+
+    //DEMO FLOW
+    if (buttonPayload === "demo-accept" || buttonPayload === "demo-cancel") {
+      console.log("Processing demo Quick Reply button");
+
+      // Check if there's a pending demo request for this phone number (try all variations)
+      const { data: demoRequests, error: requestError } = await supabase
+        .from("demo_whatsapp_request")
+        .select("*")
+        .in("phone", phoneVariations)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (requestError) {
+        console.error("Error fetching demo request:", requestError);
+        return NextResponse.json({ error: "Database error" }, { status: 500 });
+      }
+
+      console.log(`Found ${demoRequests?.length || 0} pending demo requests`);
+      if (demoRequests && demoRequests.length > 0) {
+        console.log(
+          `Match found! DB phone: ${demoRequests[0].phone}, Webhook phone: ${phoneNumber}`,
         );
-        return NextResponse.json({ status: "waiting_for_clear_response" });
+      }
+
+      // If there's a pending request, check if message is a response
+      if (demoRequests && demoRequests.length > 0) {
+        const demoRequest = demoRequests[0];
+
+        // Check Quick Reply button press first (priority)
+        if (buttonPayload === "demo-accept") {
+          console.log("Quick Reply button: demo-accept");
+          await handleApproval(phoneNumber, demoRequest);
+          return NextResponse.json({
+            status: "approved",
+            processed: true,
+            source: "quick_reply",
+          });
+        } else if (buttonPayload === "demo-cancel") {
+          console.log("Quick Reply button: demo-cancel");
+          await handleDenial(phoneNumber, demoRequest);
+          return NextResponse.json({
+            status: "denied",
+            processed: true,
+            source: "quick_reply",
+          });
+        }
+        // If no button pressed, check text message
+        else if (isApprovalMessage(messageBody)) {
+          console.log("Detected approval response from text");
+          await handleApproval(phoneNumber, demoRequest);
+          return NextResponse.json({
+            status: "approved",
+            processed: true,
+            source: "text",
+          });
+        } else if (isDenialMessage(messageBody)) {
+          console.log("Detected denial response from text");
+          await handleDenial(phoneNumber, demoRequest);
+          return NextResponse.json({
+            status: "denied",
+            processed: true,
+            source: "text",
+          });
+        } else {
+          // User sent a message but it's not a clear yes/no
+          await sendWhatsAppMessage(
+            phoneNumber,
+            `I didn't understand your response. Please click one of the buttons or reply with "yes" to receive the forecast or "no" to cancel.`,
+          );
+          return NextResponse.json({ status: "waiting_for_clear_response" });
+        }
       }
     }
-
     // No pending demo request - could handle other conversational flows here
     console.log("No pending demo request for this number");
     return NextResponse.json({ status: "no_pending_request" });
