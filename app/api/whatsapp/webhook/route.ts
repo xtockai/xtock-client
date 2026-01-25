@@ -267,62 +267,14 @@ async function handleForecastApproval(
     return;
   }
 
-  // Use the first matching collaborator
-  const matchingCollaborator = collaborators[0];
-  const locationId = matchingCollaborator.location_id;
-  console.log(`Found collaborator for location: ${locationId}`);
-
-  // Get location info
-  const { data: location, error: locationError } = await supabase
-    .from("locations")
-    .select("id, name, organization_id")
-    .eq("id", locationId)
-    .single();
-
-  if (locationError || !location) {
-    console.error(`Location ${locationId} not found:`, locationError);
-    await sendWhatsAppMessage(
-      phoneNumber,
-      "Sorry, there was an error retrieving location information.",
-    );
-    return;
-  }
+  console.log(`Found ${collaborators.length} collaborator(s) for this phone`);
 
   // Use tomorrow's date as forecast date
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
   const forecastDate = tomorrow.toISOString().split("T")[0];
-  console.log("locationId ", locationId);
   console.log("forecastDate ", forecastDate);
 
-  // Get forecasts for this location and date
-  const { data: forecasts, error: forecastError } = await supabase
-    .from("forecasts")
-    .select("*")
-    .eq("location_id", locationId)
-    .eq("forecast_date", forecastDate);
-
-  if (forecastError) {
-    console.error("Error fetching forecasts:", forecastError);
-    await sendWhatsAppMessage(
-      phoneNumber,
-      "Sorry, there was an error retrieving the forecast.",
-    );
-    return;
-  }
-
-  if (!forecasts || forecasts.length === 0) {
-    console.warn(
-      `No forecasts found for location ${locationId} on ${forecastDate}`,
-    );
-    await sendWhatsAppMessage(
-      phoneNumber,
-      "No forecast available for tomorrow. Please check back later.",
-    );
-    return;
-  }
-
-  // Format forecast message with tomorrow's date
   const dateStr = tomorrow.toLocaleDateString("en-US", {
     weekday: "long",
     year: "numeric",
@@ -330,41 +282,93 @@ async function handleForecastApproval(
     day: "numeric",
   });
 
-  let message = `📊 *${location.name} Forecast for ${dateStr}*\n\n`;
+  let sentCount = 0;
 
-  // Sort products by quantity (highest to lowest)
-  const sortedForecasts = forecasts.sort(
-    (a: any, b: any) => b.quantity - a.quantity,
-  );
+  // Iterate through all collaborators
+  for (const collaborator of collaborators) {
+    const locationId = collaborator.location_id;
+    console.log(`Processing location: ${locationId} for collaborator: ${collaborator.id}`);
 
-  sortedForecasts.forEach((forecast: any) => {
-    message += `• ${forecast.product_name}: ${forecast.quantity} ${forecast.unit || "units"}\n`;
-  });
+    // Get location info
+    const { data: location, error: locationError } = await supabase
+      .from("locations")
+      .select("id, name, organization_id")
+      .eq("id", locationId)
+      .single();
 
-  message += `\n*AI-powered forecast based on historical data*`;
+    if (locationError || !location) {
+      console.error(`Location ${locationId} not found:`, locationError);
+      continue; // Skip this collaborator and continue with next
+    }
 
-  // Send forecast
-  await sendWhatsAppMessage(phoneNumber, message);
+    console.log(`Found location: ${location.name}`);
 
-  // Record the acceptance
-  const { error: responseError } = await supabase
-    .from("forecast_responses")
-    .insert({
-      location_id: locationId,
-      organization_id: location.organization_id,
-      forecast_date: forecastDate,
-      response_type: "accept",
-      phone_number: phoneNumber,
-      collaborator_id: matchingCollaborator.id,
+    // Get forecasts for this location and date
+    const { data: forecasts, error: forecastError } = await supabase
+      .from("forecasts")
+      .select("*")
+      .eq("location_id", locationId)
+      .eq("forecast_date", forecastDate);
+
+    if (forecastError) {
+      console.error(`Error fetching forecasts for location ${locationId}:`, forecastError);
+      continue; // Skip this location and continue with next
+    }
+
+    if (!forecasts || forecasts.length === 0) {
+      console.warn(
+        `No forecasts found for location ${locationId} on ${forecastDate}`,
+      );
+      continue; // Skip this location and continue with next
+    }
+
+    // Format forecast message with tomorrow's date
+    let message = `📊 *${location.name} Forecast for ${dateStr}*\n\n`;
+
+    // Sort products by quantity (highest to lowest)
+    const sortedForecasts = forecasts.sort(
+      (a: any, b: any) => b.quantity - a.quantity,
+    );
+
+    sortedForecasts.forEach((forecast: any) => {
+      message += `• ${forecast.product_name}: ${forecast.quantity} ${forecast.unit || "units"}\n`;
     });
 
-  if (responseError) {
-    console.error("Error recording response:", responseError);
+    message += `\n*AI-powered forecast based on historical data*`;
+
+    // Send forecast
+    await sendWhatsAppMessage(phoneNumber, message);
+    sentCount++;
+
+    // Record the acceptance
+    const { error: responseError } = await supabase
+      .from("forecast_responses")
+      .insert({
+        location_id: locationId,
+        organization_id: location.organization_id,
+        forecast_date: forecastDate,
+        response_type: "accept",
+        phone_number: phoneNumber,
+        collaborator_id: collaborator.id,
+      });
+
+    if (responseError) {
+      console.error("Error recording response:", responseError);
+    }
+
+    console.log(
+      `Forecast sent successfully to ${phoneNumber} for ${location.name}`,
+    );
   }
 
-  console.log(
-    `Forecast sent successfully to ${phoneNumber} for ${location.name}`,
-  );
+  if (sentCount === 0) {
+    await sendWhatsAppMessage(
+      phoneNumber,
+      "No forecast available for tomorrow. Please check back later.",
+    );
+  } else {
+    console.log(`Total forecasts sent: ${sentCount}`);
+  }
 }
 
 // Handle real forecast denial
