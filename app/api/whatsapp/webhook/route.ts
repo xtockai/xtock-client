@@ -256,7 +256,10 @@ async function handleForecastApproval(
   }
 
   if (!collaborators || collaborators.length === 0) {
-    console.error(`No collaborator found with phone variations:`, phoneVariations);
+    console.error(
+      `No collaborator found with phone variations:`,
+      phoneVariations,
+    );
     await sendWhatsAppMessage(
       phoneNumber,
       "Sorry, we couldn't find your information. Please contact support.",
@@ -289,6 +292,8 @@ async function handleForecastApproval(
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
   const forecastDate = tomorrow.toISOString().split("T")[0];
+  console.log("locationId ", locationId);
+  console.log("forecastDate ", forecastDate);
 
   // Get forecasts for this location and date
   const { data: forecasts, error: forecastError } = await supabase
@@ -357,7 +362,9 @@ async function handleForecastApproval(
     console.error("Error recording response:", responseError);
   }
 
-  console.log(`Forecast sent successfully to ${phoneNumber} for ${location.name}`);
+  console.log(
+    `Forecast sent successfully to ${phoneNumber} for ${location.name}`,
+  );
 }
 
 // Handle real forecast denial
@@ -384,11 +391,11 @@ async function handleForecastDenial(
   }
 
   if (!collaborators || collaborators.length === 0) {
-    console.error(`No collaborator found with phone variations:`, phoneVariations);
-    await sendWhatsAppMessage(
-      phoneNumber,
-      "Thanks for your response.",
+    console.error(
+      `No collaborator found with phone variations:`,
+      phoneVariations,
     );
+    await sendWhatsAppMessage(phoneNumber, "Thanks for your response.");
     return;
   }
 
@@ -404,10 +411,7 @@ async function handleForecastDenial(
 
   if (locationError || !location) {
     console.error(`Location ${locationId} not found:`, locationError);
-    await sendWhatsAppMessage(
-      phoneNumber,
-      "Thanks for your response.",
-    );
+    await sendWhatsAppMessage(phoneNumber, "Thanks for your response.");
     return;
   }
 
@@ -472,7 +476,10 @@ export async function POST(request: NextRequest) {
     console.log(`Trying phone variations:`, phoneVariations);
 
     // REAL FORECAST FLOW
-    if (buttonPayload === "forecast-accept" || buttonPayload === "forecast-cancel") {
+    if (
+      buttonPayload === "forecast-accept" ||
+      buttonPayload === "forecast-cancel"
+    ) {
       console.log("Processing Real Forecast Quick Reply button");
 
       if (buttonPayload === "forecast-accept") {
