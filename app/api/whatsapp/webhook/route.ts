@@ -287,7 +287,9 @@ async function handleForecastApproval(
   // Iterate through all collaborators
   for (const collaborator of collaborators) {
     const locationId = collaborator.location_id;
-    console.log(`Processing location: ${locationId} for collaborator: ${collaborator.id}`);
+    console.log(
+      `Processing location: ${locationId} for collaborator: ${collaborator.id}`,
+    );
 
     // Get location info
     const { data: location, error: locationError } = await supabase
@@ -311,7 +313,10 @@ async function handleForecastApproval(
       .eq("forecast_date", forecastDate);
 
     if (forecastError) {
-      console.error(`Error fetching forecasts for location ${locationId}:`, forecastError);
+      console.error(
+        `Error fetching forecasts for location ${locationId}:`,
+        forecastError,
+      );
       continue; // Skip this location and continue with next
     }
 
@@ -327,11 +332,16 @@ async function handleForecastApproval(
 
     // Sort products by quantity (highest to lowest)
     const sortedForecasts = forecasts.sort(
-      (a: any, b: any) => b.quantity - a.quantity,
+      (a: any, b: any) => b.predicted_quantity - a.predicted_quantity,
     );
 
     sortedForecasts.forEach((forecast: any) => {
-      message += `• ${forecast.product_name}: ${forecast.quantity} ${forecast.unit || "units"}\n`;
+      if (
+        forecast.predicted_quantity === null ||
+        forecast.predicted_quantity === 0
+      )
+        return; // Skip null predictions
+      message += `• ${forecast.item}: ${forecast.predicted_quantity} units\n`;
     });
 
     message += `\n*AI-powered forecast based on historical data*`;
