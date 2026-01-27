@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { extractTimezoneFromTIMETZ } from "@/lib/timezones";
 import twilio from "twilio";
 
 // Simple forecasting function
@@ -269,19 +270,6 @@ async function handleForecastApproval(
 
   console.log(`Found ${collaborators.length} collaborator(s) for this phone`);
 
-  // Use tomorrow's date as forecast date
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const forecastDate = tomorrow.toISOString().split("T")[0];
-  console.log("forecastDate ", forecastDate);
-
-  const dateStr = tomorrow.toLocaleDateString("en-US", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-
   let sentCount = 0;
 
   // Iterate through all collaborators
@@ -294,7 +282,7 @@ async function handleForecastApproval(
     // Get location info
     const { data: location, error: locationError } = await supabase
       .from("locations")
-      .select("id, name, organization_id")
+      .select("id, name, organization_id, kitchen_close")
       .eq("id", locationId)
       .single();
 
@@ -302,6 +290,30 @@ async function handleForecastApproval(
       console.error(`Location ${locationId} not found:`, locationError);
       continue; // Skip this collaborator and continue with next
     }
+
+    // Extract timezone from location's kitchen_close field
+    const locationTimezone = extractTimezoneFromTIMETZ(location.kitchen_close);
+
+    // Use tomorrow's date in the location's timezone
+    const now = new Date();
+    const tomorrow = new Date(
+      now.toLocaleString("en-US", { timeZone: locationTimezone }),
+    );
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const forecastDate = tomorrow.toISOString().split("T")[0];
+    console.log(
+      "forecastDate (local timezone):",
+      forecastDate,
+      "timezone:",
+      locationTimezone,
+    );
+
+    const dateStr = tomorrow.toLocaleDateString("en-US", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
 
     console.log(`Found location: ${location.name}`);
 
@@ -419,7 +431,7 @@ async function handleForecastDenial(
   // Get location info
   const { data: location, error: locationError } = await supabase
     .from("locations")
-    .select("id, name, organization_id")
+    .select("id, name, organization_id, kitchen_close")
     .eq("id", locationId)
     .single();
 
@@ -429,8 +441,12 @@ async function handleForecastDenial(
     return;
   }
 
-  // Use tomorrow's date as forecast date
-  const tomorrow = new Date();
+  // Extract timezone from location's kitchen_close field and use tomorrow's date in the location's timezone
+  const locationTimezone = extractTimezoneFromTIMETZ(location.kitchen_close);
+  const now = new Date();
+  const tomorrow = new Date(
+    now.toLocaleString("en-US", { timeZone: locationTimezone }),
+  );
   tomorrow.setDate(tomorrow.getDate() + 1);
   const forecastDate = tomorrow.toISOString().split("T")[0];
 
