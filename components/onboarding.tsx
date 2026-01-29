@@ -494,6 +494,9 @@ export default function Onboarding() {
 
   // Function to parse different date formats
   const parseDate = (dateStr: string): Date => {
+    // Remove any extra whitespace
+    dateStr = dateStr.trim()
+
     // Handle YYYYMMDD format (e.g., "20251122")
     if (/^\d{8}$/.test(dateStr)) {
       const year = parseInt(dateStr.substring(0, 4))
@@ -501,11 +504,65 @@ export default function Onboarding() {
       const day = parseInt(dateStr.substring(6, 8))
       return new Date(year, month, day)
     }
+
+    // Handle ISO format: YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      return new Date(dateStr + "T00:00:00.000Z")
+    }
+
+    // Handle DD/MM/YYYY or MM/DD/YYYY format
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(dateStr)) {
+      const [first, second, year] = dateStr.split("/").map(Number)
+      let day: number, month: number
+
+      if (first > 12) {
+        // First part > 12, must be DD/MM/YYYY format
+        day = first
+        month = second
+      } else if (second > 12) {
+        // Second part > 12, must be MM/DD/YYYY format
+        month = first
+        day = second
+      } else {
+        // Ambiguous case - try both formats and use the valid one
+        const testDateDDMM = new Date(year, second - 1, first)
+        const testDateMMDD = new Date(year, first - 1, second)
+        
+        const isDDMMValid = testDateDDMM.getFullYear() === year && 
+                           testDateDDMM.getMonth() === second - 1 && 
+                           testDateDDMM.getDate() === first
+        const isMMDDValid = testDateMMDD.getFullYear() === year && 
+                           testDateMMDD.getMonth() === first - 1 && 
+                           testDateMMDD.getDate() === second
+        
+        if (isDDMMValid && !isMMDDValid) {
+          day = first
+          month = second
+        } else if (isMMDDValid && !isDDMMValid) {
+          month = first
+          day = second
+        } else {
+          // Default to DD/MM/YYYY (European format)
+          day = first
+          month = second
+        }
+      }
+
+      // Validate
+      if (month < 1 || month > 12) {
+        throw new Error(`Invalid month in date: ${dateStr}`)
+      }
+      if (day < 1 || day > 31) {
+        throw new Error(`Invalid day in date: ${dateStr}`)
+      }
+
+      return new Date(year, month - 1, day)
+    }
     
     // Handle other standard formats
     const date = new Date(dateStr)
     if (isNaN(date.getTime())) {
-      throw new Error(`Invalid date format: ${dateStr}`)
+      throw new Error(`Invalid date format: ${dateStr}. Supported formats: YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY, YYYYMMDD`)
     }
     return date
   }

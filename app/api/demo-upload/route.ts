@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
         {
           error: "Missing required fields: restaurant or csvData",
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
       console.error("Error fetching existing sales demo data:", fetchError);
       return NextResponse.json(
         { error: "Failed to check existing data" },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
         console.error("Error inserting new sales demo data:", insertError);
         return NextResponse.json(
           { error: "Failed to save new records" },
-          { status: 500 }
+          { status: 500 },
         );
       }
 
@@ -118,7 +118,7 @@ export async function POST(request: NextRequest) {
     console.error("Error in demo CSV upload API:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -139,24 +139,46 @@ function parseDate(dateStr: string): Date {
     const [first, second, year] = dateStr.split("/").map(Number);
 
     // Logic to determine if it's DD/MM/YYYY (European/Spanish) or MM/DD/YYYY (US)
-    // If first part is > 12, it must be day (DD/MM/YYYY)
-    // If second part is > 12, it must be DD/MM/YYYY format
     let day: number, month: number;
 
     if (first > 12) {
-      // Definitely DD/MM/YYYY format
+      // First part > 12, must be DD/MM/YYYY format
       day = first;
       month = second;
     } else if (second > 12) {
-      // Definitely DD/MM/YYYY format
-      day = first;
-      month = second;
+      // Second part > 12, must be MM/DD/YYYY format
+      month = first;
+      day = second;
     } else {
       // Ambiguous case (both <= 12)
-      // Default to DD/MM/YYYY (European/Spanish format) since it's more common internationally
-      // and the user mentioned Spanish format specifically
-      day = first;
-      month = second;
+      // Try both formats and see which one creates a valid date
+      // First try DD/MM/YYYY (European format)
+      const testDateDDMM = new Date(year, second - 1, first);
+      const testDateMMDD = new Date(year, first - 1, second);
+
+      // Check if both dates are valid
+      const isDDMMValid =
+        testDateDDMM.getFullYear() === year &&
+        testDateDDMM.getMonth() === second - 1 &&
+        testDateDDMM.getDate() === first;
+      const isMMDDValid =
+        testDateMMDD.getFullYear() === year &&
+        testDateMMDD.getMonth() === first - 1 &&
+        testDateMMDD.getDate() === second;
+
+      if (isDDMMValid && !isMMDDValid) {
+        // Only DD/MM/YYYY is valid
+        day = first;
+        month = second;
+      } else if (isMMDDValid && !isDDMMValid) {
+        // Only MM/DD/YYYY is valid
+        month = first;
+        day = second;
+      } else {
+        // Both are valid or both are invalid - default to DD/MM/YYYY (European format)
+        day = first;
+        month = second;
+      }
     }
 
     // Validate month
@@ -190,22 +212,45 @@ function parseDate(dateStr: string): Date {
   }
 
   if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(dateStr)) {
-    // Format with single digits: D/M/YYYY or DD/M/YYYY or D/MM/YYYY
+    // Format with single digits: D/M/YYYY or DD/M/YYYY or D/MM/YYYY or M/D/YYYY or MM/D/YYYY or M/DD/YYYY
     const [first, second, year] = dateStr.split("/").map(Number);
 
     // Apply same logic as above for DD/MM/YYYY vs MM/DD/YYYY
     let day: number, month: number;
 
     if (first > 12) {
+      // First part > 12, must be DD/MM/YYYY format
       day = first;
       month = second;
     } else if (second > 12) {
-      day = first;
-      month = second;
+      // Second part > 12, must be MM/DD/YYYY format
+      month = first;
+      day = second;
     } else {
-      // Default to DD/MM/YYYY format
-      day = first;
-      month = second;
+      // Ambiguous case - try both formats
+      const testDateDDMM = new Date(year, second - 1, first);
+      const testDateMMDD = new Date(year, first - 1, second);
+
+      const isDDMMValid =
+        testDateDDMM.getFullYear() === year &&
+        testDateDDMM.getMonth() === second - 1 &&
+        testDateDDMM.getDate() === first;
+      const isMMDDValid =
+        testDateMMDD.getFullYear() === year &&
+        testDateMMDD.getMonth() === first - 1 &&
+        testDateMMDD.getDate() === second;
+
+      if (isDDMMValid && !isMMDDValid) {
+        day = first;
+        month = second;
+      } else if (isMMDDValid && !isDDMMValid) {
+        month = first;
+        day = second;
+      } else {
+        // Default to DD/MM/YYYY format
+        day = first;
+        month = second;
+      }
     }
 
     // Validate
@@ -231,7 +276,7 @@ function parseDate(dateStr: string): Date {
   const date = new Date(dateStr);
   if (isNaN(date.getTime())) {
     throw new Error(
-      `Invalid date format: ${dateStr}. Supported formats: YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY, YYYYMMDD`
+      `Invalid date format: ${dateStr}. Supported formats: YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY, DD-MM-YYYY, YYYYMMDD`,
     );
   }
   return date;
